@@ -30,7 +30,7 @@ $Manifest = Join-Path $Dest "$HostName.json"
 @{ name = $HostName; description = "Aside Sync native host"; path = $Bat; type = "stdio"; allowed_origins = @("chrome-extension://$ExtId/") } |
   ConvertTo-Json | ForEach-Object { [IO.File]::WriteAllText($Manifest, $_, (New-Object System.Text.UTF8Encoding($false))) }
 
-foreach ($k in @("HKCU:\Software\Google\Chrome\NativeMessagingHosts", "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts", "HKCU:\Software\Chromium\NativeMessagingHosts", "HKCU:\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts")) {
+foreach ($k in @("HKCU:\Software\Aside\NativeMessagingHosts", "HKCU:\Software\Google\Chrome\NativeMessagingHosts", "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts", "HKCU:\Software\Chromium\NativeMessagingHosts", "HKCU:\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts")) {
   $p = Join-Path $k $HostName
   New-Item -Path $p -Force | Out-Null
   Set-ItemProperty -Path $p -Name "(default)" -Value $Manifest

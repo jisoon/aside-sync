@@ -35,6 +35,8 @@ irm https://raw.githubusercontent.com/jisoon/aside-sync/main/install.ps1 | iex
 **상태를 보고 싶다면 크롬 확장 (선택, 한 번만)**
 1. `chrome://extensions` → 오른쪽 위 **개발자 모드** 켜기
 2. **압축해제된 확장 프로그램 로드** → `~/.aside-sync/app/extension` 선택 (Windows: `%USERPROFILE%\.aside-sync\app\extension`)
+   - Chrome, Aside 브라우저 어디에 로드해도 됩니다.
+   - macOS에서 `.aside-sync` 폴더가 숨김이라 안 보이면 선택 창에서 **Cmd+Shift+G** → 경로 붙여넣기 (또는 **Cmd+Shift+.** 로 숨김 파일 표시)
 
 팝업에서 상태(정상/오류/동기화 중), 마지막 동기화 시각과 방식(자동/수동), 자동 동기화 등록 상태, 연결된 PC 목록을 볼 수 있고 **지금 동기화**도 할 수 있습니다.
 옵션에서 주기를 바꾸면 OS 예약 작업에 바로 반영됩니다(0 = 끄기). 다른 PC에서 채팅을 받아오면 알림이 뜹니다.

@@ -23,7 +23,7 @@ LAUNCH
 chmod +x "$DEST/aside-sync-host.sh"
 
 if [ "$(uname)" = "Darwin" ]; then
-  BASES=("Google/Chrome" "Google/Chrome Beta" "Google/Chrome Canary" "Chromium" "Microsoft Edge" "BraveSoftware/Brave-Browser" "Arc/User Data")
+  BASES=("Aside" "Google/Chrome" "Google/Chrome Beta" "Google/Chrome Canary" "Chromium" "Microsoft Edge" "BraveSoftware/Brave-Browser" "Arc/User Data")
   ROOT="$HOME/Library/Application Support"
 else
   BASES=("google-chrome" "google-chrome-beta" "chromium" "microsoft-edge" "BraveSoftware/Brave-Browser")
