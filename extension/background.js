@@ -103,6 +103,25 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     switch (msg.type) {
       case 'sync': return runSync();
       case 'isSyncing': return { running: !!syncing };
+      case 'connectGit': {
+        const r = await callHost({ type: 'connectGit', url: msg.url, accountDir: msg.accountDir }, (message) => broadcast({ type: 'connect-progress', message }));
+        pollStatus();
+        return r;
+      }
+      case 'checkUpdate': {
+        const { updateInfo } = await chrome.storage.local.get('updateInfo');
+        if (!msg.force && updateInfo && Date.now() - updateInfo.at < 6 * 3600 * 1000) return updateInfo;
+        const r = await callHost({ type: 'checkUpdate' });
+        const info = { ...r, at: Date.now() };
+        await chrome.storage.local.set({ updateInfo: info });
+        return info;
+      }
+      case 'update': {
+        const r = await callHost({ type: 'update' }, (message) => broadcast({ type: 'update-progress', message }));
+        await chrome.storage.local.remove('updateInfo');
+        setTimeout(() => chrome.runtime.reload(), 1500); // load the new extension files from disk
+        return r;
+      }
       case 'host': {
         const r = await callHost(msg.payload);
         if (msg.payload?.type === 'status') applyStatus(r);

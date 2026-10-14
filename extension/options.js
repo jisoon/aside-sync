@@ -84,4 +84,26 @@ $('saveSync').onclick = async () => {
 };
 chrome.runtime.onMessage.addListener((m) => { if (m.type === 'sync-progress') $('msg').textContent = m.message; });
 
+let connecting = false;
+$('connect').onclick = async () => {
+  const out = $('connectMsg');
+  connecting = true; $('connect').disabled = true;
+  out.className = 'muted'; out.textContent = '연결 중...';
+  try {
+    const r = await chrome.runtime.sendMessage({ type: 'connectGit', url: $('gitRemote').value.trim(), accountDir: $('accountDir').value || undefined });
+    if (!r || r.type === 'error') throw new Error(r?.error || '연결 실패');
+    const res = r.result; const acc = (r.accounts || []).find((a) => a.dir === r.config.accountDir);
+    const lines = [`✔ 연결됨: ${r.config.gitRemote}`];
+    if (acc) lines.push(`Aside 계정: u/${acc.id} (채팅 ${acc.sessionFolders}개)${r.autoPicked ? '. 계정이 여러 개라 지금 쓰고 있는 계정으로 고정했습니다. 다르면 아래 "Aside 계정"에서 바꾸고 다시 연결하세요.' : ''}`);
+    lines.push(r.scheduler?.installed ? `자동 동기화: ${r.config.autoSyncMinutes}분마다` : `자동 동기화: ${r.scheduler?.pendingLogin ? '다음 로그인부터' : '등록 실패, 팝업의 다시 등록 버튼'}`);
+    lines.push(`첫 동기화: 채팅 ↑${res.sessions.uploaded} ↓${res.sessions.downloaded}, 파일 ↑${res.files.uploaded} ↓${res.files.downloaded}`);
+    if (res.sessions.downloaded) lines.push('받아온 채팅은 Aside를 재시작하면 목록에 보입니다.');
+    if (res.errors?.length) lines.push('오류: ' + res.errors.join('\n'));
+    out.className = res.ok ? 'ok' : 'err'; out.textContent = lines.join('\n');
+    await load();
+  } catch (e) { out.className = 'err'; out.textContent = e.message; }
+  finally { connecting = false; $('connect').disabled = false; }
+};
+chrome.runtime.onMessage.addListener((m) => { if (m.type === 'connect-progress' && connecting) $('connectMsg').textContent = m.message; });
+
 load();

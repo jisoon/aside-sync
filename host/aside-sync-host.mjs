@@ -21,7 +21,9 @@ import { DatabaseSync } from 'node:sqlite';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
+const CODE_REPO = process.env.ASIDE_SYNC_REPO || 'jisoon/aside-sync';
+const CODE_BRANCH = process.env.ASIDE_SYNC_BRANCH || 'main';
 const HOST_FILE = fileURLToPath(import.meta.url);
 const SCHED_LABEL = process.env.ASIDE_SYNC_LABEL || 'com.aside.sync';
 const WIN_TASK = process.env.ASIDE_SYNC_LABEL || 'AsideSync';
@@ -63,7 +65,7 @@ function checkSyncDir(dir, { create = false } = {}) {
   if (fs.existsSync(abs)) return abs;
   const mount = cloudMountRoot(abs);
   if (mount && !fs.existsSync(mount)) throw new Error(`클라우드 드라이브가 연결되어 있지 않습니다 (${path.basename(mount)}). 클라우드 앱 로그인 상태를 확인하세요.`);
-  if (!create) throw new Error(`동기화 폴더를 찾을 수 없습니다: ${abs} — 클라우드 앱(Google Drive 등)이 로그아웃/일시중지됐거나 폴더가 이동·삭제됐을 수 있습니다. 클라우드와 연결 안 된 폴더가 생기는 것을 막기 위해 자동으로 만들지 않습니다. 확장 옵션에서 폴더를 다시 지정하세요.`);
+  if (!create) throw new Error(`동기화 폴더를 찾을 수 없습니다: ${abs}. 클라우드 앱(Google Drive 등)이 로그아웃/일시중지됐거나 폴더가 이동·삭제됐을 수 있습니다. 클라우드와 연결 안 된 폴더가 생기는 것을 막기 위해 자동으로 만들지 않습니다. 확장 옵션에서 폴더를 다시 지정하세요.`);
   if (!fs.existsSync(path.dirname(abs))) throw new Error(`상위 폴더가 없습니다: ${path.dirname(abs)}`);
   ensureDir(abs);
   return abs;
@@ -157,7 +159,7 @@ function loadConfig() {
 
 function saveConfig(patch) {
   if (patch.syncDir) checkSyncDir(patch.syncDir, { create: true });
-  if (patch.gitRemote) { patch.gitRemote = String(patch.gitRemote).trim(); checkGitRemote(patch.gitRemote); }
+  if (patch.gitRemote) { patch.gitRemote = normalizeGitUrl(patch.gitRemote); checkGitRemote(patch.gitRemote); }
   const cfg = loadConfig();
   const next = { ...cfg, ...patch, include: { ...cfg.include, ...(patch.include || {}) } };
   next.deviceId = cfg.deviceId; // immutable
@@ -886,6 +888,81 @@ async function withLock(fn) {
   throw new Error('lock 획득 실패');
 }
 
+// "github.com/me/repo", "https://github.com/me/repo", ".../repo.git" -> https://github.com/me/repo.git
+function normalizeGitUrl(u) {
+  u = String(u || '').trim();
+  const m = u.match(/^(?:https?:\/\/)?(?:www\.)?github\.com\/([^/\s]+)\/([^/\s#?]+?)(?:\.git)?(?:[/#?].*)?$/i); // also browser URLs like .../tree/main
+  if (m) return `https://github.com/${m[1]}/${m[2]}.git`;
+  return u;
+}
+
+// One-step setup from the extension: verify repo access, pin the Aside account, register the OS
+// scheduler, then run the first sync. Only the initial native-host install needs a terminal.
+async function connectGit(msg, progress) {
+  const url = normalizeGitUrl(msg.url);
+  if (!url) throw new Error('저장소 주소를 입력하세요 (예: https://github.com/아이디/aside-sync-data)');
+  progress('저장소 접근 확인 중...');
+  checkGitRemote(url);
+  const cfg0 = loadConfig();
+  const accounts = listAccounts(cfg0.asideRoot);
+  let accountDir = msg.accountDir || cfg0.accountDir;
+  let autoPicked = false;
+  if (!accountDir) {
+    if (!accounts.length) throw new Error(`Aside 계정 폴더를 찾지 못했습니다: ${path.join(cfg0.asideRoot, 'u')}`);
+    accountDir = accounts[0].dir; // most recently used = the Aside account being used right now
+    autoPicked = accounts.length > 1;
+  }
+  const patch = { gitRemote: url, accountDir };
+  if (!Number(cfg0.autoSyncMinutes)) patch.autoSyncMinutes = 15;
+  const config = saveConfig(patch);
+  let scheduler = null;
+  try { scheduler = applySchedule(config); } catch (e) { scheduler = { ok: false, error: e.message }; }
+  const result = await runSync(progress, 'manual');
+  return { config, accounts, autoPicked, scheduler, result };
+}
+
+const cmpVer = (a, b) => { const x = String(a).split('.').map(Number); const y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); } return 0; };
+async function checkUpdate() {
+  const res = await fetch(`https://raw.githubusercontent.com/${CODE_REPO}/${CODE_BRANCH}/host/aside-sync-host.mjs?t=${now()}`, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`업데이트 확인 실패: HTTP ${res.status}`);
+  const latest = ((await res.text()).match(/const VERSION = '([^']+)'/) || [])[1];
+  return { current: VERSION, latest, newer: !!latest && cmpVer(latest, VERSION) > 0 };
+}
+
+// Self-update: download the code repo, replace ~/.aside-sync/app (extension/host/install) and the running
+// host file, then re-run the platform installer (re-registers the native host for all browsers).
+async function selfUpdate(progress) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'aside-sync-upd-'));
+  try {
+    progress('새 버전 받는 중...');
+    const res = await fetch(`https://codeload.github.com/${CODE_REPO}/tar.gz/refs/heads/${CODE_BRANCH}`);
+    if (!res.ok) throw new Error(`다운로드 실패: HTTP ${res.status}`);
+    const tgz = path.join(tmp, 'src.tgz');
+    fs.writeFileSync(tgz, Buffer.from(await res.arrayBuffer()));
+    run('tar', ['-xzf', tgz, '-C', tmp]);
+    const src = fs.readdirSync(tmp).map((n) => path.join(tmp, n)).find((p) => fs.statSync(p).isDirectory());
+    const newHost = path.join(src, 'host', 'aside-sync-host.mjs');
+    const to = (fs.readFileSync(newHost, 'utf8').match(/const VERSION = '([^']+)'/) || [])[1];
+    if (!to) throw new Error('받은 파일이 올바르지 않습니다.');
+    run(process.execPath, ['--check', newHost]); // never install a host that does not parse
+    progress(`v${to} 설치 중...`);
+    const APP = path.join(SYNC_HOME, 'app');
+    ensureDir(APP);
+    for (const d of ['extension', 'host', 'install']) {
+      fs.rmSync(path.join(APP, d), { recursive: true, force: true });
+      fs.cpSync(path.join(src, d), path.join(APP, d), { recursive: true });
+    }
+    for (const fn of ['README.md', 'install.sh', 'install.ps1']) { try { fs.copyFileSync(path.join(src, fn), path.join(APP, fn)); } catch {} }
+    copyAtomic(newHost, HOST_FILE);
+    try {
+      if (process.platform === 'win32') run('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(APP, 'install', 'install-windows.ps1')]);
+      else run('bash', [path.join(APP, 'install', 'install-mac.sh')]);
+    } catch (e) { log('installer after update failed:', e.message); }
+    log(`self-update ${VERSION} -> ${to}`);
+    return { from: VERSION, to };
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+}
+
 async function runSync(onProgress, trigger = 'manual') {
   return withLock(async () => {
     const cfg = loadConfig();
@@ -947,7 +1024,7 @@ function gitAvailable() { try { gitRaw(['--version']); return true; } catch { re
 function checkGitRemote(url) {
   if (!gitAvailable()) throw new Error('git이 설치되어 있지 않습니다 (macOS: xcode-select --install, Windows: Git for Windows 설치).');
   try { gitRaw(['ls-remote', '--heads', url], { timeout: 120000 }); }
-  catch (e) { throw new Error(`저장소에 접근할 수 없습니다: ${gitMsg(e)} — 주소와 이 PC의 git 로그인(GitHub 자격 증명)을 확인하세요.`); }
+  catch (e) { throw new Error(`저장소에 접근할 수 없습니다: ${gitMsg(e)}. 주소와 이 PC의 git 로그인(GitHub 자격 증명)을 확인하세요.`); }
 }
 function gitHasRef(ref) { try { git(['rev-parse', '--verify', '--quiet', ref]); return true; } catch { return false; } }
 function gitCommitAll(msg) {
@@ -1132,6 +1209,9 @@ async function handle(msg, send) {
       return { type: 'config', config, scheduler };
     }
     case 'schedule': return { type: 'scheduler', scheduler: applySchedule() };
+    case 'connectGit': return { type: 'connected', ...(await connectGit(msg, (m) => send({ type: 'progress', message: m }))) };
+    case 'checkUpdate': return { type: 'update-info', ...(await checkUpdate()) };
+    case 'update': return { type: 'updated', ...(await selfUpdate((m) => send({ type: 'progress', message: m }))) };
     case 'sync': {
       const result = await runSync((m) => send({ type: 'progress', message: m }), 'manual');
       return { type: 'result', result };
@@ -1178,6 +1258,11 @@ async function cliMain(args) {
     process.exit(r.ok ? 0 : 1);
   } else if (cmd === 'status') console.log(JSON.stringify(status(), null, 2));
   else if (cmd === 'detect') console.log(JSON.stringify(detect(), null, 2));
+  else if (cmd === 'connect') {
+    const r = await connectGit({ url: args[1], accountDir: args[2] }, (m) => console.log('·', m));
+    console.log(JSON.stringify({ gitRemote: r.config.gitRemote, accountDir: r.config.accountDir, autoPicked: r.autoPicked, accounts: r.accounts.map((a) => `u/${a.id} (채팅 ${a.sessionFolders}개)`), scheduler: r.scheduler, result: { ok: r.result.ok, sessions: r.result.sessions, files: r.result.files, errors: r.result.errors } }, null, 2));
+  } else if (cmd === 'update') console.log(JSON.stringify(await selfUpdate((m) => console.log('·', m)), null, 2));
+  else if (cmd === 'check-update') console.log(JSON.stringify(await checkUpdate(), null, 2));
   else if (cmd === 'schedule') console.log(JSON.stringify(applySchedule(), null, 2));
   else if (cmd === 'unschedule') console.log(JSON.stringify(applySchedule({ ...loadConfig(), autoSyncMinutes: 0 }), null, 2));
   else if (cmd === 'config') {
@@ -1190,7 +1275,7 @@ async function cliMain(args) {
     }
     console.log(JSON.stringify(saveConfig(patch), null, 2));
   } else {
-    console.log('usage: aside-sync-host.mjs [sync|status|detect|schedule|unschedule|config key=value ...]');
+    console.log('usage: aside-sync-host.mjs [connect <github-url> [accountDir]|sync|status|detect|schedule|unschedule|update|check-update|config key=value ...]');
   }
 }
 

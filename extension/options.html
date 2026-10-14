@@ -4,13 +4,17 @@
 <style>body{max-width:640px;margin:0 auto;padding:28px 20px}</style></head>
 <body>
   <h1><img src="icons/48.png" alt="">Aside Sync 설정</h1>
-  <p class="muted">모든 PC에서 <b>같은 클라우드 폴더</b>(Google Drive, iCloud, Dropbox, OneDrive, NAS 등)를 지정하면 채팅 기록과 메모리가 서로 동기화됩니다.</p>
+  <p class="muted">모든 PC에서 <b>같은 GitHub 비공개 저장소</b>(또는 같은 클라우드 폴더)를 지정하면 채팅 기록과 메모리가 서로 동기화됩니다.</p>
 
   <div id="hostErr" class="card err" hidden></div>
 
   <h2>GitHub 저장소 (권장)</h2>
-  <input type="text" id="gitRemote" placeholder="https://github.com/내아이디/aside-sync-data.git">
-  <div class="muted" style="margin-top:4px">반드시 <b>비공개(Private)</b> 저장소를 쓰세요. 채팅 원문이 올라갑니다. 지정하면 아래 동기화 폴더 대신 이 저장소로 동기화합니다 (git 필요).</div>
+  <div class="row" style="gap:8px">
+    <input type="text" id="gitRemote" placeholder="https://github.com/내아이디/aside-sync-data" style="flex:1">
+    <button class="primary" id="connect">연결</button>
+  </div>
+  <div class="muted" style="margin-top:4px">주소만 넣고 <b>연결</b>을 누르면 저장소 확인 → Aside 계정 고정 → 자동 동기화 등록 → 첫 동기화까지 한 번에 합니다. 반드시 <b>비공개(Private)</b> 저장소를 쓰세요 (채팅 원문이 올라갑니다). 이 PC에서 git으로 그 저장소에 접근할 수 있어야 합니다.</div>
+  <div id="connectMsg" style="margin-top:8px;white-space:pre-wrap"></div>
 
   <h2>동기화 폴더 (GitHub 대신 클라우드 폴더를 쓸 때)</h2>
   <input type="text" id="syncDir" placeholder="/Users/me/Library/CloudStorage/GoogleDrive-.../My Drive/AsideSync">

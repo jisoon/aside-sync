@@ -8,12 +8,16 @@
     <a href="#" id="opts" class="muted">설정</a>
   </div>
 
+  <div id="upd" class="card" hidden>
+    <div class="row"><span id="updText"></span><button id="updBtn">업데이트</button></div>
+  </div>
+
   <div class="card">
     <div class="row"><span>이 PC</span><b id="device">-</b></div>
     <div class="row"><span>상태</span><span><span id="dot" class="dot"></span><span id="state">-</span></span></div>
     <div class="row"><span>마지막 동기화</span><span id="last">-</span></div>
     <div class="row"><span>자동 동기화</span><span id="sched">-</span></div>
-    <div class="row"><span>동기화 폴더</span><span id="dir" class="muted" style="max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl">-</span></div>
+    <div class="row"><span>동기화 대상</span><span id="dir" class="muted" style="max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl">-</span></div>
     <button id="fixSched" hidden style="width:100%;margin-top:8px">자동 동기화 다시 등록</button>
   </div>
 

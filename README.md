@@ -14,7 +14,18 @@ Google Drive / iCloud / Dropbox / OneDrive / NAS 같은 **공유 폴더**를 통
 | 메모리 동시 수정 | 다른 줄이면 줄 단위로 자동 병합 | 동일 (병합 기준 파일이 남아 있을 때) |
 | 필요한 것 | git + GitHub 로그인, **비공개** 저장소 | 클라우드 앱 |
 
-### GitHub 모드 설정
+### GitHub 모드 설정 (가장 쉬운 방법)
+
+1. GitHub에서 **비공개(Private)** 빈 저장소를 만듭니다 (예: `aside-sync-data`).
+2. 확장 **설정 → GitHub 저장소**에 주소를 붙여넣고 **연결**. 브라우저 주소창 주소(`https://github.com/아이디/aside-sync-data`)를 그대로 넣어도 됩니다.
+   저장소 접근 확인 → Aside 계정 고정(여러 개면 지금 쓰는 계정, 화면에서 변경 가능) → 자동 동기화 등록 → 첫 동기화까지 한 번에 합니다.
+3. 다른 PC도 같은 주소로 **연결**하면 끝.
+
+업데이트: 새 버전이 있으면 팝업에 **업데이트** 버튼이 뜹니다. 누르면 새 버전을 받아 설치하고 확장을 스스로 다시 불러옵니다 (터미널 불필요). 터미널에서는 `aside-sync-host.mjs update`.
+
+처음 설치(크롬과 엔진 연결 등록)만 PC마다 한 번 설치 명령이 필요합니다. 브라우저 보안상 확장이 스스로 할 수 없는 단계입니다.
+
+### GitHub 모드 설정 (수동/CLI)
 
 1. GitHub에서 **비공개(Private)** 저장소를 하나 만듭니다 (예: `aside-sync-data`, README 없이 빈 저장소). 채팅 원문이 올라가므로 절대 공개로 만들지 마세요.
 2. 각 PC에서 그 저장소에 `git push`가 되는지 확인합니다 (평소 쓰는 GitHub 로그인/자격 증명 그대로 사용).
@@ -117,6 +128,8 @@ irm https://raw.githubusercontent.com/jisoon/aside-sync/main/install.ps1 | iex
 
 ```bash
 NODE=~/.aside/runtime/bin/node
+$NODE ~/.aside-sync/host/aside-sync-host.mjs connect https://github.com/<아이디>/aside-sync-data   # 한 번에 설정
+$NODE ~/.aside-sync/host/aside-sync-host.mjs update        # 최신 버전으로 업데이트
 $NODE ~/.aside-sync/host/aside-sync-host.mjs detect        # 계정/클라우드 폴더 감지
 $NODE ~/.aside-sync/host/aside-sync-host.mjs config syncDir='"/path/to/AsideSync"'
 $NODE ~/.aside-sync/host/aside-sync-host.mjs sync
@@ -143,6 +156,7 @@ $NODE ~/.aside-sync/host/aside-sync-host.mjs unschedule    # 자동 동기화 �
 
 ## 변경 이력
 
+- **1.3.0**: 확장에서 GitHub 주소만 넣고 **연결**하면 접근 확인, 계정 고정, 자동 동기화 등록, 첫 동기화까지 한 번에. 팝업 **업데이트** 버튼(자체 업데이트 후 확장 자동 새로고침). CLI `connect <주소>`, `update`, `check-update`
 - **1.2.0**: GitHub(git) 저장소 동기화 모드, 양쪽에서 고친 메모리 텍스트 파일 줄 단위 3-way 병합, `memory/.dream-state.json` 제외(PC별 상태), 충돌로 진 쪽 사본도 `conflicts/`에 `.other-pc`로 백업, 옵션에서 계정 고정 유지
 - **1.1.6**: Aside 계정 폴더(`~/.aside/u/<id>`)가 여러 개면 자동으로 고르지 않음. 처음 동기화한 계정을 config에 고정하고, 계정이 바뀌면 비교 기준 초기화
 - **1.1.5**: 대량 삭제가 막혔을 때 `sync --keep-local`로 이 PC 파일을 다시 올려 되살리는 옵션

@@ -56,7 +56,8 @@ async function refresh() {
   $('fixSched').hidden = !!sc.ok || !c.autoSyncMinutes;
 
   const r = st.lastResult;
-  if (!c.syncDir && !c.gitRemote) setState('bad', '동기화 대상 미설정');
+  if (st.accountError) { setState('bad', '설정 필요'); if (!busy) { $('msg').className = 'err'; $('msg').textContent = st.accountError + '\n→ 설정에서 Aside 계정을 고르세요.'; } $('sync').disabled = true; return; }
+  if (!c.syncDir && !c.gitRemote) setState('bad', '동기화 대상 미설정 (설정에서 GitHub 주소 입력)');
   else if (st.running || busy) setState('run', '동기화 중...');
   else if (r && !r.ok) setState('bad', '오류');
   else if (r) setState('ok', '정상');
@@ -101,5 +102,20 @@ chrome.runtime.onMessage.addListener((m) => {
   if (m.type === 'sync-progress') { $('msg').className = 'muted'; $('msg').textContent = m.message; }
 });
 
+async function checkUpd() {
+  try {
+    const r = await send({ type: 'checkUpdate' });
+    if (r?.newer) { $('upd').hidden = false; $('updText').textContent = `새 버전 v${r.latest} (현재 v${r.current})`; }
+  } catch {}
+}
+$('updBtn').onclick = async () => {
+  $('updBtn').disabled = true; $('updText').textContent = '업데이트 중...';
+  const r = await send({ type: 'update' });
+  if (!r || r.type === 'error') { $('updText').className = 'err'; $('updText').textContent = r?.error || '업데이트 실패'; $('updBtn').disabled = false; return; }
+  $('updText').className = 'ok'; $('updText').textContent = `v${r.to}로 업데이트했습니다. 확장을 다시 불러옵니다...`;
+};
+chrome.runtime.onMessage.addListener((m) => { if (m.type === 'update-progress') $('updText').textContent = m.message; });
+
 refresh();
+checkUpd();
 setInterval(() => { if (!busy) refresh(); }, 3000); // background (scheduler) syncs show up live
