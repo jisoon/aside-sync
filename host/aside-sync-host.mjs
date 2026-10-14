@@ -21,7 +21,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const VERSION = '1.1.5';
+const VERSION = '1.1.6';
 const HOST_FILE = fileURLToPath(import.meta.url);
 const SCHED_LABEL = process.env.ASIDE_SYNC_LABEL || 'com.aside.sync';
 const WIN_TASK = process.env.ASIDE_SYNC_LABEL || 'AsideSync';
@@ -196,11 +196,19 @@ function listAccounts(asideRoot) {
     .sort((a, b) => b.lastActive - a.lastActive);
 }
 
-function resolveAccountDir(cfg) {
-  if (cfg.accountDir) return cfg.accountDir;
-  const acc = listAccounts(cfg.asideRoot)[0];
-  if (!acc) throw new Error(`Aside 계정 폴더를 찾지 못했습니다: ${path.join(cfg.asideRoot, 'u')}`);
-  return acc.dir;
+// Which Aside account (~/.aside/u/<id>) to sync. Never guess between several accounts: picking "the most
+// recently used" flips when the user switches accounts, and the 3-way base of one account applied to another
+// makes every file of the first look deleted (tombstones that then spread to all PCs).
+function resolveAccountDir(cfg, st = null) {
+  if (cfg.accountDir) {
+    if (!fs.existsSync(path.join(cfg.accountDir, 'state.db'))) throw new Error(`지정한 Aside 계정 폴더가 없습니다: ${cfg.accountDir}`);
+    return cfg.accountDir;
+  }
+  const accs = listAccounts(cfg.asideRoot);
+  if (!accs.length) throw new Error(`Aside 계정 폴더를 찾지 못했습니다: ${path.join(cfg.asideRoot, 'u')}`);
+  if (accs.length === 1) return accs[0].dir;
+  if (st?.accountDir && accs.some((a) => a.dir === st.accountDir)) return st.accountDir;
+  throw new Error(`Aside 계정 폴더가 여러 개입니다 (${accs.map((a) => `u/${a.id}: 채팅 ${a.sessionFolders}개`).join(', ')}). 동기화할 계정을 지정하세요: aside-sync-host.mjs config accountDir='"${accs[0].dir}"'`);
 }
 
 function detectCloudFolders() {
@@ -351,11 +359,11 @@ class SyncRun {
   constructor(cfg, onProgress) {
     this.cfg = cfg;
     this.onProgress = onProgress || (() => {});
-    this.accountDir = resolveAccountDir(cfg);
+    this.state = loadState();
+    this.accountDir = resolveAccountDir(cfg, this.state);
     this.sessionsDir = path.join(this.accountDir, 'sessions');
     this.codec = makePathCodec(this.accountDir);
     this.store = new Store(cfg.syncDir);
-    this.state = loadState();
     this.res = {
       startedAt: now(), finishedAt: null, ok: false, device: cfg.deviceName, trigger: 'manual',
       sessions: { uploaded: 0, downloaded: 0, skippedRunning: 0, pending: 0, conflicts: 0 },
@@ -396,6 +404,13 @@ class SyncRun {
       log('store changed:', this.state.storeId, '->', storeId);
     }
     this.state.storeId = storeId;
+    if (this.state.accountDir && this.state.accountDir !== this.accountDir) {
+      this.state.sessions = {}; this.state.files = {}; this.state.settings = null;
+      this.res.notes.push('동기화할 Aside 계정이 바뀌어 비교 기준을 초기화했습니다 (삭제 없음).');
+      log('account changed:', this.state.accountDir, '->', this.accountDir);
+    }
+    this.state.accountDir = this.accountDir;
+    if (!this.cfg.accountDir) { this.cfg = saveConfig({ accountDir: this.accountDir }); this.res.notes.push(`동기화할 Aside 계정을 고정했습니다: ${this.accountDir}`); }
     this.progress(`계정 폴더: ${this.accountDir}`);
     this.db = openDb(this.accountDir);
     try {
@@ -952,7 +967,7 @@ function status() {
   const cfg = loadConfig();
   const st = loadState();
   let accountDir = null; let accountError = null;
-  try { accountDir = resolveAccountDir(cfg); } catch (e) { accountError = e.message; }
+  try { accountDir = resolveAccountDir(cfg, st); } catch (e) { accountError = e.message; }
   let devices = [];
   if (cfg.syncDir) {
     const store = new Store(cfg.syncDir);

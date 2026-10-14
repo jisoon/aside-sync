@@ -111,10 +111,12 @@ $NODE ~/.aside-sync/host/aside-sync-host.mjs unschedule    # 자동 동기화 �
 | Drive에 `AsideSync`, `AsideSync 2`가 생김 | 두 PC가 같은 이름 폴더를 따로 만들었음 (한쪽이 오프라인/로그아웃 상태) | 하나를 정해 모든 PC의 syncDir을 같은 폴더로 지정 → 동기화 → 나머지 폴더는 휴지통으로 |
 | 동기화는 됐는데 채팅 목록에 없음 | Aside가 실행 중에는 새 채팅을 목록에 반영하지 않음 | Aside(브라우저) 재시작 |
 | 자동 동기화가 "저장됨 (다음 로그인부터)" | launchd 등록이 현재 세션에서 거부됨 (원격/샌드박스 셸 등) | 팝업의 **다시 등록** 또는 터미널에서 `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.aside.sync.plist` |
+| 다른 PC에서 파일 수십 개가 "지워짐"으로 올라옴 | 그 PC에 Aside 계정 폴더가 여러 개(`u/0`, `u/1`)이고, v1.1.5 이하는 최근 사용 계정을 자동 선택해 계정이 중간에 바뀜 | v1.1.6으로 업데이트 후 `config accountDir='"~/.aside/u/<id>"'`로 계정 지정. 지워진 파일은 원본이 있는 PC에서 `sync --keep-local` |
 | 메모리 파일이 사라짐 | v1.1.0 이하에서 동기화 폴더가 바뀌었을 때의 버그 (v1.1.1에서 수정) | 이전 폴더(`AsideSync 2` 등)의 `manifests/<deviceId>.json` 해시로 `blobs/`에서 복원. 휴지통에서 이전 폴더 복원 가능(30일) |
 
 ## 변경 이력
 
+- **1.1.6**: Aside 계정 폴더(`~/.aside/u/<id>`)가 여러 개면 자동으로 고르지 않음. 처음 동기화한 계정을 config에 고정하고, 계정이 바뀌면 비교 기준 초기화
 - **1.1.5**: 대량 삭제가 막혔을 때 `sync --keep-local`로 이 PC 파일을 다시 올려 되살리는 옵션
 - **1.1.4**: 동기화 중 폴더 자동 생성 금지, 대량 삭제 차단 + 삭제 전 백업, PC 간 수신 확인으로 클라우드 정지 감지, 팝업에 삭제 수/엔진 메모 표시
 - **1.1.3**: Google Drive 중복 하위 폴더(`a6 2`) 허용
