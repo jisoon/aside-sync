@@ -46,8 +46,14 @@ if (-not $status.config.syncDir) {
   }
 } else { Write-Host "==> 기존 동기화 폴더 유지: $($status.config.syncDir)" }
 
+Write-Host "==> 자동 동기화 등록 (크롬이 꺼져 있어도 백그라운드에서 실행)"
+$sched = & $Node --no-warnings $HostJs schedule | Out-String | ConvertFrom-Json
+if ($sched.installed) { Write-Host "    작업 스케줄러에 등록 완료" } else { Write-Host "    등록 실패: 확장 팝업의 '다시 등록' 버튼으로 재시도하세요" }
+
 Write-Host ""
-Write-Host "설치 완료. 마지막으로 크롬에 확장을 한 번만 등록하세요:"
+Write-Host "설치 완료. 동기화는 이제 자동으로 돌아갑니다."
+Write-Host ""
+Write-Host "상태 확인용 크롬 확장 (선택, 한 번만):"
 Write-Host "   1) 주소창에 chrome://extensions 입력 -> 오른쪽 위 '개발자 모드' 켜기"
 Write-Host "   2) '압축해제된 확장 프로그램 로드' -> 아래 폴더 선택"
 Write-Host "      $App\extension"

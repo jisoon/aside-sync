@@ -18,8 +18,13 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
+const HOST_FILE = fileURLToPath(import.meta.url);
+const SCHED_LABEL = process.env.ASIDE_SYNC_LABEL || 'com.aside.sync';
+const WIN_TASK = process.env.ASIDE_SYNC_LABEL || 'AsideSync';
 const SYNC_HOME = process.env.ASIDE_SYNC_HOME || path.join(os.homedir(), '.aside-sync');
 const CONFIG_FILE = path.join(SYNC_HOME, 'config.json');
 const STATE_FILE = path.join(SYNC_HOME, 'state.json');
@@ -105,7 +110,6 @@ function defaultConfig() {
     accountDir: '', // auto-detect when empty
     syncDir: '', // cloud folder, e.g. ~/Library/CloudStorage/GoogleDrive-.../My Drive/AsideSync
     autoSyncMinutes: 15,
-    syncOnStartup: true,
     maxFileMB: 100,
     include: {
       sessions: true, // chat history (messages.jsonl + DB rows)
@@ -299,7 +303,7 @@ class SyncRun {
     this.store = new Store(cfg.syncDir);
     this.state = loadState();
     this.res = {
-      startedAt: now(), finishedAt: null, ok: false, device: cfg.deviceName,
+      startedAt: now(), finishedAt: null, ok: false, device: cfg.deviceName, trigger: 'manual',
       sessions: { uploaded: 0, downloaded: 0, skippedRunning: 0, pending: 0, conflicts: 0 },
       projects: { downloaded: 0 }, files: { uploaded: 0, downloaded: 0, deleted: 0, conflicts: 0 },
       settings: null, blobsRemoved: 0, errors: [], notes: [],
@@ -706,12 +710,113 @@ async function withLock(fn) {
   throw new Error('lock 획득 실패');
 }
 
-async function runSync(onProgress) {
+async function runSync(onProgress, trigger = 'manual') {
   return withLock(async () => {
     const cfg = loadConfig();
-    const run = new SyncRun(cfg, onProgress);
-    return run.run();
+    try {
+      const run = new SyncRun(cfg, onProgress);
+      run.res.trigger = trigger;
+      return await run.run();
+    } catch (e) {
+      // record setup-level failures so the extension can show them
+      const st = loadState();
+      if (!st.lastResult || st.lastResult.finishedAt < now() - 1000) {
+        st.lastResult = { startedAt: now(), finishedAt: now(), ok: false, trigger, device: cfg.deviceName,
+          sessions: { uploaded: 0, downloaded: 0, skippedRunning: 0, pending: 0, conflicts: 0 }, projects: { downloaded: 0 },
+          files: { uploaded: 0, downloaded: 0, deleted: 0, conflicts: 0 }, errors: [e.message], notes: [] };
+        saveState(st);
+      }
+      throw e;
+    }
   });
+}
+
+// ---------------------------------------------------------------- OS scheduler
+// The OS (launchd / Task Scheduler / cron) runs "sync --trigger=scheduler" in the
+// background, so syncing works even when Chrome is closed. The extension only
+// changes the interval and shows status.
+function syncCommand() {
+  return [process.execPath, '--no-warnings', HOST_FILE, 'sync', '--trigger=scheduler'];
+}
+const xmlEsc = (v) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', windowsHide: true, ...opts });
+
+function macPlistPath() { return path.join(os.homedir(), 'Library', 'LaunchAgents', `${SCHED_LABEL}.plist`); }
+
+function applySchedule(cfg = loadConfig()) {
+  const minutes = Math.max(0, Math.round(Number(cfg.autoSyncMinutes) || 0));
+  const cmd = syncCommand();
+  ensureDir(SYNC_HOME);
+  if (process.platform === 'darwin') {
+    const plist = macPlistPath();
+    const domain = `gui/${process.getuid()}`;
+    try { run('launchctl', ['bootout', `${domain}/${SCHED_LABEL}`]); } catch {}
+    if (!minutes) { fs.rmSync(plist, { force: true }); return schedulerStatus(cfg); }
+    const env = process.env.ASIDE_SYNC_HOME ? `<key>EnvironmentVariables</key><dict><key>ASIDE_SYNC_HOME</key><string>${xmlEsc(process.env.ASIDE_SYNC_HOME)}</string></dict>` : '';
+    ensureDir(path.dirname(plist));
+    fs.writeFileSync(plist, `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>${xmlEsc(SCHED_LABEL)}</string>
+<key>ProgramArguments</key><array>${cmd.map((a) => `<string>${xmlEsc(a)}</string>`).join('')}</array>
+<key>StartInterval</key><integer>${minutes * 60}</integer>
+<key>RunAtLoad</key><true/>
+<key>ProcessType</key><string>Background</string>
+<key>LowPriorityIO</key><true/>
+<key>StandardOutPath</key><string>${xmlEsc(path.join(SYNC_HOME, 'scheduler.log'))}</string>
+<key>StandardErrorPath</key><string>${xmlEsc(path.join(SYNC_HOME, 'scheduler.log'))}</string>
+${env}
+</dict></plist>
+`);
+    try { run('launchctl', ['bootstrap', domain, plist]); }
+    catch (e1) {
+      try { run('launchctl', ['load', '-w', plist]); }
+      catch { log('launchctl bootstrap failed (will start at next login):', e1.message); }
+    }
+  } else if (process.platform === 'win32') {
+    try { run('schtasks', ['/Delete', '/F', '/TN', WIN_TASK]); } catch {}
+    if (!minutes) return schedulerStatus(cfg);
+    // VBScript wrapper runs node with a hidden window (no console flash)
+    const vbs = path.join(SYNC_HOME, 'run-hidden.vbs');
+    const q = (a) => `""${a}""`;
+    const line = `CreateObject("WScript.Shell").Run "${cmd.map(q).join(' ')}", 0, False\r\n`;
+    fs.writeFileSync(vbs, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(line, 'utf16le')]));
+    run('schtasks', ['/Create', '/F', '/SC', 'MINUTE', '/MO', String(Math.min(minutes, 1439)), '/TN', WIN_TASK, '/TR', `wscript.exe "${vbs}"`]);
+    try { run('schtasks', ['/Run', '/TN', WIN_TASK]); } catch {}
+  } else {
+    let tab = '';
+    try { tab = run('crontab', ['-l']); } catch {}
+    const lines = tab.split('\n').filter((l) => l.trim() && !l.includes('# aside-sync'));
+    if (minutes) {
+      const when = minutes < 60 ? `*/${minutes} * * * *` : `0 */${Math.max(1, Math.round(minutes / 60))} * * *`;
+      const envp = process.env.ASIDE_SYNC_HOME ? `ASIDE_SYNC_HOME='${process.env.ASIDE_SYNC_HOME}' ` : '';
+      lines.push(`${when} ${envp}${cmd.map((a) => `'${a}'`).join(' ')} >/dev/null 2>&1 # aside-sync`);
+    }
+    run('crontab', ['-'], { input: lines.join('\n') + '\n', stdio: ['pipe', 'pipe', 'pipe'] });
+  }
+  return schedulerStatus(cfg);
+}
+
+function schedulerStatus(cfg = loadConfig()) {
+  const minutes = Math.max(0, Math.round(Number(cfg.autoSyncMinutes) || 0));
+  let installed = false; let kind = '';
+  try {
+    if (process.platform === 'darwin') {
+      kind = 'launchd';
+      run('launchctl', ['print', `gui/${process.getuid()}/${SCHED_LABEL}`]);
+      installed = true;
+    } else if (process.platform === 'win32') {
+      kind = 'Task Scheduler';
+      run('schtasks', ['/Query', '/TN', WIN_TASK]);
+      installed = true;
+    } else {
+      kind = 'cron';
+      installed = run('crontab', ['-l']).includes('# aside-sync');
+    }
+  } catch {}
+  const usesThisHost = process.platform !== 'darwin' || (() => { try { return fs.readFileSync(macPlistPath(), 'utf8').includes(xmlEsc(HOST_FILE)); } catch { return false; } })();
+  const pendingLogin = process.platform === 'darwin' && !installed && minutes > 0 && fs.existsSync(macPlistPath());
+  return { kind, installed, pendingLogin, minutes, ok: minutes === 0 ? !installed : installed && usesThisHost };
 }
 
 function status() {
@@ -724,7 +829,11 @@ function status() {
     const store = new Store(cfg.syncDir);
     devices = store.readDeviceFiles('devices');
   }
-  return { version: VERSION, node: process.version, config: cfg, accountDir, accountError, lastResult: st.lastResult, devices, syncHome: SYNC_HOME };
+  let scheduler = null;
+  try { scheduler = schedulerStatus(cfg); } catch (e) { scheduler = { error: e.message }; }
+  let running = false;
+  try { const l = readJson(LOCK_FILE); if (l) { process.kill(l.pid, 0); running = true; } } catch {}
+  return { version: VERSION, node: process.version, config: cfg, accountDir, accountError, lastResult: st.lastResult, devices, syncHome: SYNC_HOME, scheduler, running };
 }
 
 function detect() {
@@ -741,10 +850,15 @@ async function handle(msg, send) {
       const patch = { ...(msg.config || {}) };
       delete patch.deviceId;
       if (patch.syncDir) patch.syncDir = patch.syncDir.replace(/^~(?=$|[\\/])/, os.homedir());
-      return { type: 'config', config: saveConfig(patch) };
+      const before = loadConfig();
+      const config = saveConfig(patch);
+      let scheduler = null;
+      if (Number(before.autoSyncMinutes) !== Number(config.autoSyncMinutes) || !schedulerStatus(config).ok) scheduler = applySchedule(config);
+      return { type: 'config', config, scheduler };
     }
+    case 'schedule': return { type: 'scheduler', scheduler: applySchedule() };
     case 'sync': {
-      const result = await runSync((m) => send({ type: 'progress', message: m }));
+      const result = await runSync((m) => send({ type: 'progress', message: m }), 'manual');
       return { type: 'result', result };
     }
     default: throw new Error(`unknown message type: ${msg?.type}`);
@@ -780,11 +894,15 @@ function nativeMain() {
 async function cliMain(args) {
   const cmd = args[0] || 'status';
   if (cmd === 'sync') {
-    const r = await runSync((m) => console.log('·', m));
+    const trigger = (args.find((a) => a.startsWith('--trigger=')) || '--trigger=cli').split('=')[1];
+    if (trigger === 'scheduler' && !loadConfig().syncDir) { console.log('syncDir not set, skipping'); process.exit(0); }
+    const r = await runSync((m) => console.log('·', m), trigger);
     console.log(JSON.stringify(r, null, 2));
     process.exit(r.ok ? 0 : 1);
   } else if (cmd === 'status') console.log(JSON.stringify(status(), null, 2));
   else if (cmd === 'detect') console.log(JSON.stringify(detect(), null, 2));
+  else if (cmd === 'schedule') console.log(JSON.stringify(applySchedule(), null, 2));
+  else if (cmd === 'unschedule') console.log(JSON.stringify(applySchedule({ ...loadConfig(), autoSyncMinutes: 0 }), null, 2));
   else if (cmd === 'config') {
     const patch = {};
     for (const kv of args.slice(1)) {
@@ -795,7 +913,7 @@ async function cliMain(args) {
     }
     console.log(JSON.stringify(saveConfig(patch), null, 2));
   } else {
-    console.log('usage: aside-sync-host.mjs [sync|status|detect|config key=value ...]');
+    console.log('usage: aside-sync-host.mjs [sync|status|detect|schedule|unschedule|config key=value ...]');
   }
 }
 

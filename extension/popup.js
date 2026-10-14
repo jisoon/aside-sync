@@ -1,5 +1,7 @@
 const $ = (id) => document.getElementById(id);
 const send = (msg) => chrome.runtime.sendMessage(msg);
+const TRIGGER = { manual: '수동', scheduler: '자동', cli: '명령어' };
+let busy = false;
 
 function ago(ts) {
   if (!ts) return '-';
@@ -16,58 +18,84 @@ function showResult(r) {
   $('sDown').textContent = r.sessions.downloaded;
   $('fUp').textContent = r.files.uploaded;
   $('fDown').textContent = r.files.downloaded + r.files.deleted;
-  $('last').textContent = ago(r.finishedAt);
+  $('last').textContent = `${ago(r.finishedAt)} · ${TRIGGER[r.trigger] || r.trigger || '-'}`;
   const notes = [];
   if (r.sessions.skippedRunning) notes.push(`실행 중인 채팅 ${r.sessions.skippedRunning}개는 다음에 동기화`);
   if (r.sessions.pending) notes.push(`클라우드 업로드 대기 ${r.sessions.pending}개`);
   if (r.sessions.conflicts || r.files.conflicts) notes.push(`충돌 ${r.sessions.conflicts + r.files.conflicts}건 (최신 쪽 유지)`);
   if (r.sessions.downloaded) notes.push('새 채팅이 목록에 안 보이면 Aside를 재시작하세요');
   $('notes').textContent = notes.join(' · ');
-  if (r.errors?.length) { $('msg').className = 'err'; $('msg').textContent = r.errors.slice(0, 3).join('\n'); }
+}
+
+function setState(kind, text) {
+  $('dot').className = `dot ${kind}`;
+  $('state').textContent = text;
 }
 
 async function refresh() {
   const st = await send({ type: 'host', payload: { type: 'status' } });
   if (st?.type === 'error') {
+    setState('bad', '연결 안 됨');
     $('msg').className = 'err'; $('msg').textContent = st.error; $('sync').disabled = true; return;
   }
-  $('device').textContent = st.config.deviceName;
-  $('dir').textContent = st.config.syncDir || '미설정';
-  $('dir').title = st.config.syncDir;
-  if (!st.config.syncDir) { $('msg').className = 'err'; $('msg').textContent = '설정에서 동기화 폴더를 먼저 지정하세요.'; $('sync').disabled = true; }
-  showResult(st.lastResult);
+  const c = st.config;
+  $('device').textContent = c.deviceName;
+  $('dir').textContent = c.syncDir || '미설정';
+  $('dir').title = c.syncDir;
+
+  const sc = st.scheduler || {};
+  if (!c.autoSyncMinutes) $('sched').textContent = '꺼짐';
+  else if (sc.installed) $('sched').innerHTML = `<span class="ok">${c.autoSyncMinutes}분마다</span>`;
+  else if (sc.pendingLogin) $('sched').textContent = `${c.autoSyncMinutes}분마다 (다음 로그인부터)`;
+  else $('sched').innerHTML = '<span class="err">등록 안 됨</span>';
+  $('sched').title = sc.kind ? `${sc.kind}${sc.error ? ': ' + sc.error : ''}` : '';
+  $('fixSched').hidden = !!sc.ok || !c.autoSyncMinutes;
+
+  const r = st.lastResult;
+  if (!c.syncDir) setState('bad', '동기화 폴더 미설정');
+  else if (st.running || busy) setState('run', '동기화 중...');
+  else if (r && !r.ok) setState('bad', '오류');
+  else if (r) setState('ok', '정상');
+  else setState('', '아직 동기화 안 함');
+  if (r?.errors?.length && !busy) { $('msg').className = 'err'; $('msg').textContent = r.errors.slice(0, 3).join('\n'); }
+  showResult(r);
+  $('sync').disabled = !c.syncDir || busy || st.running;
+  $('sync').textContent = busy || st.running ? '동기화 중...' : '지금 동기화';
+
   $('devices').innerHTML = '';
   for (const d of (st.devices || []).sort((a, b) => b.lastSyncAt - a.lastSyncAt)) {
     const el = document.createElement('div');
     el.className = 'row';
-    el.innerHTML = `<span></span><span class="muted"></span>`;
-    el.children[0].textContent = d.deviceName + (d.deviceId === st.config.deviceId ? ' (이 PC)' : '');
+    el.innerHTML = '<span></span><span class="muted"></span>';
+    el.children[0].textContent = d.deviceName + (d.deviceId === c.deviceId ? ' (이 PC)' : '');
     el.children[1].textContent = ago(d.lastSyncAt);
     $('devices').appendChild(el);
   }
   if (!st.devices?.length) $('devices').textContent = '아직 없음';
-  const { running } = await send({ type: 'isSyncing' });
-  setRunning(running);
-}
-
-function setRunning(on) {
-  $('sync').disabled = on;
-  $('sync').textContent = on ? '동기화 중...' : '지금 동기화';
 }
 
 $('sync').onclick = async () => {
+  busy = true;
   $('msg').className = 'muted'; $('msg').textContent = '시작...';
-  setRunning(true);
+  $('sync').disabled = true; $('sync').textContent = '동기화 중...';
+  setState('run', '동기화 중...');
   const r = await send({ type: 'sync' });
-  setRunning(false);
-  if (r?.ok) { $('msg').className = 'ok'; $('msg').textContent = r.result.ok ? '동기화 완료' : '일부 오류와 함께 완료'; refresh(); }
+  busy = false;
+  if (r?.ok) { $('msg').className = r.result.ok ? 'ok' : 'err'; $('msg').textContent = r.result.ok ? '동기화 완료' : r.result.errors.join('\n'); }
   else { $('msg').className = 'err'; $('msg').textContent = r?.error || '실패'; }
+  refresh();
+};
+$('fixSched').onclick = async () => {
+  const r = await send({ type: 'host', payload: { type: 'schedule' } });
+  $('msg').className = r?.type === 'error' ? 'err' : 'muted';
+  $('msg').textContent = r?.type === 'error' ? r.error : '자동 동기화를 다시 등록했습니다.';
+  refresh();
 };
 $('opts').onclick = (e) => { e.preventDefault(); chrome.runtime.openOptionsPage(); };
 
 chrome.runtime.onMessage.addListener((m) => {
   if (m.type === 'sync-progress') { $('msg').className = 'muted'; $('msg').textContent = m.message; }
-  if (m.type === 'sync-state') setRunning(m.running);
 });
 
 refresh();
+setInterval(() => { if (!busy) refresh(); }, 3000); // background (scheduler) syncs show up live

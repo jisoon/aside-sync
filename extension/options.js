@@ -1,6 +1,15 @@
 const $ = (id) => document.getElementById(id);
 const host = (payload) => chrome.runtime.sendMessage({ type: 'host', payload });
 
+function showSched(sc, minutes) {
+  const el = $('schedState');
+  if (!sc) { el.textContent = ''; return; }
+  if (!minutes) { el.className = 'muted'; el.textContent = '자동 동기화 꺼짐 (수동으로만 동기화)'; }
+  else if (sc.installed) { el.className = 'ok'; el.textContent = `✔ ${sc.kind}에 등록됨: ${minutes}분마다 실행`; }
+  else if (sc.pendingLogin) { el.className = 'muted'; el.textContent = `${sc.kind}에 저장됨: 다음 로그인부터 ${minutes}분마다 실행`; }
+  else { el.className = 'err'; el.textContent = `자동 동기화가 등록되지 않았습니다${sc.error ? ': ' + sc.error : ''}. 팝업의 '다시 등록' 버튼을 눌러보세요.`; }
+}
+
 async function load() {
   const st = await host({ type: 'status' });
   if (st?.type === 'error') {
@@ -12,7 +21,7 @@ async function load() {
   $('syncDir').value = c.syncDir || '';
   $('deviceName').value = c.deviceName || '';
   $('autoSyncMinutes').value = c.autoSyncMinutes;
-  $('syncOnStartup').checked = !!c.syncOnStartup;
+  showSched(st.scheduler, c.autoSyncMinutes);
   $('maxFileMB').value = c.maxFileMB;
   for (const el of document.querySelectorAll('[data-inc]')) el.checked = !!c.include[el.dataset.inc];
   $('home').textContent = st.syncHome;
@@ -47,13 +56,12 @@ async function save() {
     deviceName: $('deviceName').value.trim() || undefined,
     accountDir: $('accountDir').value,
     autoSyncMinutes: Number($('autoSyncMinutes').value) || 0,
-    syncOnStartup: $('syncOnStartup').checked,
     maxFileMB: Number($('maxFileMB').value) || 100,
     include,
   };
   const r = await host({ type: 'setConfig', config });
   if (r?.type === 'error') throw new Error(r.error);
-  await chrome.runtime.sendMessage({ type: 'reschedule' });
+  if (r.scheduler) showSched(r.scheduler, r.config.autoSyncMinutes);
   return r.config;
 }
 

@@ -1,17 +1,20 @@
 <!doctype html>
 <html lang="ko">
 <head><meta charset="utf-8"><link rel="stylesheet" href="style.css">
-<style>body{width:340px;padding:14px}</style></head>
+<style>body{width:340px;padding:14px} .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--muted)} .dot.ok{background:var(--ok)} .dot.bad{background:var(--bad)} .dot.run{background:var(--acc);animation:p 1s infinite alternate} @keyframes p{to{opacity:.3}}</style></head>
 <body>
   <div class="row">
     <h1><img src="icons/48.png" alt="">Aside Sync</h1>
     <a href="#" id="opts" class="muted">설정</a>
   </div>
 
-  <div class="card" id="statusCard">
+  <div class="card">
     <div class="row"><span>이 PC</span><b id="device">-</b></div>
+    <div class="row"><span>상태</span><span><span id="dot" class="dot"></span><span id="state">-</span></span></div>
     <div class="row"><span>마지막 동기화</span><span id="last">-</span></div>
+    <div class="row"><span>자동 동기화</span><span id="sched">-</span></div>
     <div class="row"><span>동기화 폴더</span><span id="dir" class="muted" style="max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl">-</span></div>
+    <button id="fixSched" hidden style="width:100%;margin-top:8px">자동 동기화 다시 등록</button>
   </div>
 
   <div class="card">

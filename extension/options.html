@@ -25,7 +25,8 @@
     <span>주기(분, 0이면 끔)</span>
     <input type="number" id="autoSyncMinutes" min="0" style="width:100px">
   </div>
-  <label class="chk"><input type="checkbox" id="syncOnStartup"> 크롬 시작 시 동기화</label>
+  <div class="muted" style="margin-top:4px">macOS/Windows 예약 작업으로 실행되어 <b>크롬이 꺼져 있어도</b> 백그라운드에서 동기화됩니다. 로그인할 때도 한 번 실행됩니다.</div>
+  <div id="schedState" style="margin-top:4px"></div>
 
   <h2>동기화 대상</h2>
   <label class="chk"><input type="checkbox" data-inc="sessions"> <span><b>채팅 기록</b> <span class="muted">대화 내용, 제목, 고정/보관 상태</span></span></label>

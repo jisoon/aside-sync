@@ -44,8 +44,14 @@ else
   echo "==> 기존 동기화 폴더 유지: $CUR"
 fi
 
+echo "==> 자동 동기화 등록 (크롬이 꺼져 있어도 백그라운드에서 실행)"
+SCHED="$("$NODE" --no-warnings "$HOSTJS" schedule 2>&1 || true)"
+if echo "$SCHED" | grep -q '"installed": true'; then echo "    등록 완료"; elif echo "$SCHED" | grep -q '"pendingLogin": true'; then echo "    저장됨 (다음 로그인부터 실행)"; else echo "    등록 실패: 확장 팝업의 '다시 등록' 버튼으로 재시도하세요"; echo "$SCHED" | tail -3; fi
+
 echo ""
-echo "✔ 설치 완료. 마지막으로 크롬에 확장을 한 번만 등록하세요:"
+echo "✔ 설치 완료. 동기화는 이제 자동으로 돌아갑니다."
+echo ""
+echo "상태 확인용 크롬 확장 (선택, 한 번만):"
 echo "   1) 주소창에 chrome://extensions 입력 → 오른쪽 위 '개발자 모드' 켜기"
 echo "   2) '압축해제된 확장 프로그램 로드' → 아래 폴더 선택"
 echo "      $APP/extension"
