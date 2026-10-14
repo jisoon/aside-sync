@@ -21,7 +21,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const VERSION = '1.1.6';
+const VERSION = '1.2.0';
 const HOST_FILE = fileURLToPath(import.meta.url);
 const SCHED_LABEL = process.env.ASIDE_SYNC_LABEL || 'com.aside.sync';
 const WIN_TASK = process.env.ASIDE_SYNC_LABEL || 'AsideSync';
@@ -36,7 +36,7 @@ const SCHEMA = 1;
 
 // settings.json keys that are device specific or contain secrets -> never synced
 const SETTINGS_EXCLUDE = ['routineDeviceId', 'externalPasswordManagers', 'cli', 'mcp', 'customModels', 'analytics'];
-const FILE_EXCLUDE = [/^memory\/memory-index-local\.json$/, /^memory\/\.local-memory\//, /(^|\/)\.DS_Store$/, /(^|\/)Thumbs\.db$/, /\.aside-sync-tmp$/];
+const FILE_EXCLUDE = [/^memory\/memory-index-local\.json$/, /^memory\/\.dream-state\.json$/, /^memory\/\.local-memory\//, /(^|\/)\.DS_Store$/, /(^|\/)Thumbs\.db$/, /\.aside-sync-tmp$/];
 // columns that only make sense on the machine that owns the browser
 const ROW_FP_IGNORE = ['active_tab_target_id', 'browser_binding'];
 
@@ -131,6 +131,7 @@ function defaultConfig() {
     asideRoot: path.join(os.homedir(), '.aside'),
     accountDir: '', // auto-detect when empty
     syncDir: '', // cloud folder, e.g. ~/Library/CloudStorage/GoogleDrive-.../My Drive/AsideSync
+    gitRemote: '', // git mode: private repo URL, e.g. https://github.com/me/aside-sync-data.git (takes precedence over syncDir)
     autoSyncMinutes: 15,
     maxFileMB: 100,
     include: {
@@ -156,6 +157,7 @@ function loadConfig() {
 
 function saveConfig(patch) {
   if (patch.syncDir) checkSyncDir(patch.syncDir, { create: true });
+  if (patch.gitRemote) { patch.gitRemote = String(patch.gitRemote).trim(); checkGitRemote(patch.gitRemote); }
   const cfg = loadConfig();
   const next = { ...cfg, ...patch, include: { ...cfg.include, ...(patch.include || {}) } };
   next.deviceId = cfg.deviceId; // immutable
@@ -410,7 +412,7 @@ class SyncRun {
       log('account changed:', this.state.accountDir, '->', this.accountDir);
     }
     this.state.accountDir = this.accountDir;
-    if (!this.cfg.accountDir) { this.cfg = saveConfig({ accountDir: this.accountDir }); this.res.notes.push(`동기화할 Aside 계정을 고정했습니다: ${this.accountDir}`); }
+    if (!this.cfg.accountDir) { saveConfig({ accountDir: this.accountDir }); this.cfg = { ...this.cfg, accountDir: this.accountDir }; this.res.notes.push(`동기화할 Aside 계정을 고정했습니다: ${this.accountDir}`); }
     this.progress(`계정 폴더: ${this.accountDir}`);
     this.db = openDb(this.accountDir);
     try {
@@ -422,11 +424,14 @@ class SyncRun {
       const peers = this.store.readDeviceFiles('devices').filter((d) => d.deviceId && d.deviceId !== this.cfg.deviceId);
       this.checkPeers(peers);
       const lastSyncAt = now();
-      writeJsonAtomic(this.store.p('devices', `${this.cfg.deviceId}.json`), {
+      // git mode: an idle run should not create a commit every 15 min -> heartbeat at most every 30 min
+      const r = this.res; const changed = r.sessions.uploaded + r.sessions.downloaded + r.files.uploaded + r.files.downloaded + r.files.deleted + (r.projects.downloaded || 0) > 0;
+      const ownDevice = this.store.p('devices', `${this.cfg.deviceId}.json`);
+      if (!this.cfg.gitRemote || changed || !fs.existsSync(ownDevice) || lastSyncAt - (this.state.lastPublishedAt || 0) > 30 * 60 * 1000) writeJsonAtomic(this.store.p('devices', `${this.cfg.deviceId}.json`), {
         deviceId: this.cfg.deviceId, deviceName: this.cfg.deviceName, platform: process.platform, version: VERSION, lastSyncAt,
         seen: Object.fromEntries(peers.map((p) => [p.deviceId, p.lastSyncAt])),
       });
-      this.state.lastPublishedAt = lastSyncAt;
+      if (readJson(ownDevice, {}).lastSyncAt === lastSyncAt) this.state.lastPublishedAt = lastSyncAt;
       this.res.ok = this.res.errors.length === 0;
     } finally {
       try { this.db.close(); } catch {}
@@ -674,6 +679,36 @@ class SyncRun {
     return this.fileRoots().some((r) => rel.startsWith(r + '/'));
   }
 
+  // Both PCs edited the same text file since the last sync: merge line by line (git merge-file) using the
+  // last synced version as base. Clean merge -> write + publish the merged file. Overlapping edits -> null,
+  // and the caller falls back to "newest wins" (+ backup of the losing copy).
+  tryMerge(rel, abs, B, S, myManifest, base) {
+    if (!/\.(md|txt|jsonl)$/i.test(rel) || !gitAvailable()) return false;
+    const bp = this.store.findBlob(B); const sp = this.store.findBlob(S);
+    if (!bp || !sp) return false;
+    if (fs.statSync(abs).size > 2e6 || fs.statSync(sp).size > 2e6) return false;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'aside-merge-'));
+    try {
+      const lf = path.join(tmp, 'local'); const bf = path.join(tmp, 'base'); const rf = path.join(tmp, 'remote');
+      fs.copyFileSync(abs, lf); fs.copyFileSync(bp, bf); fs.copyFileSync(sp, rf);
+      const args = ['merge-file', '-p'];
+      if (/\.jsonl$/i.test(rel)) args.push('--union'); // append-only logs: keep both sides' lines
+      let out;
+      try { out = gitRaw([...args, lf, bf, rf], { encoding: 'buffer' }); } catch { return false; } // exit>0 = conflicts
+      const out2 = path.join(tmp, 'merged'); fs.writeFileSync(out2, out);
+      const h = hashFileSync(out2); const size = out.length;
+      copyAtomic(out2, abs);
+      this.store.putBlob(h, size, abs);
+      const st = fs.statSync(abs);
+      myManifest.entries[rel] = { hash: h, size, mtime: Math.round(st.mtimeMs), at: now() };
+      base[rel] = h;
+      this.res.files.merged = (this.res.files.merged || 0) + 1;
+      this.res.files.uploaded++;
+      log(`merged ${rel}`);
+      return true;
+    } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+  }
+
   syncFiles() {
     if (!this.fileRoots().length && !this.cfg.include.persona) return;
     this.progress('메모리/스킬 파일 동기화 중...');
@@ -715,13 +750,16 @@ class SyncRun {
         let push = false; let pull = false;
         if (lc && !sc) push = true;
         else if (sc && !lc) pull = true;
-        else {
+        else if (L && S && B && this.tryMerge(rel, abs, B, S, myManifest, base)) {
+          manifestDirty = true; continue;
+        } else {
           // both changed, or first sync with differing content -> newest wins
           const lTime = lInfo ? lInfo.mtimeMs : 0;
           const rTime = R ? (R.mtime || R.at) : 0;
           if (rTime > lTime) pull = true; else push = true;
           if (L && S) this.res.files.conflicts++;
           if (pull && L) { copyAtomic(abs, path.join(conflictDir, ...rel.split('/'))); }
+          if (push && S) { const sp = this.store.findBlob(S); if (sp) copyAtomic(sp, path.join(conflictDir, ...rel.split('/')) + '.other-pc'); }
           // first sync and remote has no file -> keep local (push)
         }
         if (push) {
@@ -802,6 +840,7 @@ class SyncRun {
 
   // ---------------- blob garbage collection
   gcBlobs() {
+    if (this.cfg.gitRemote) return;
     const KEEP_MS = 3 * 24 * 3600 * 1000;
     const refs = new Set();
     for (const id of this.store.listDir('sessions')) {
@@ -851,9 +890,17 @@ async function runSync(onProgress, trigger = 'manual') {
   return withLock(async () => {
     const cfg = loadConfig();
     try {
-      const run = new SyncRun(cfg, onProgress);
+      const gitMode = !!cfg.gitRemote;
+      if (gitMode) gitPrepare(cfg, onProgress || (() => {}));
+      const run = new SyncRun(gitMode ? { ...cfg, syncDir: GIT_DIR } : cfg, onProgress);
       run.res.trigger = trigger;
-      return await run.run();
+      const res = await run.run();
+      if (gitMode) {
+        try { if (gitPublish(cfg, res, onProgress || (() => {}))) res.notes.push('저장소에 올렸습니다.'); }
+        catch (e) { res.errors.push(e.message); res.ok = false; }
+        const st = loadState(); st.lastResult = res; saveState(st);
+      }
+      return res;
     } catch (e) {
       // record setup-level failures so the extension can show them
       const st = loadState();
@@ -877,6 +924,89 @@ function syncCommand() {
 }
 const xmlEsc = (v) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', windowsHide: true, ...opts });
+
+// ---------------------------------------------------------------- git transport (GitHub etc.)
+// With config.gitRemote set, the store lives in a local clone (~/.aside-sync/repo) and each sync is
+// fetch+rebase -> SyncRun -> commit -> push. Every device only writes its own files (devices/<id>.json,
+// manifests/<id>.json, sessions/<sid>/<id>.json) and blobs are content-addressed, so rebases do not conflict.
+// Unlike a cloud-drive folder: an upload failure is an explicit error, nothing is half-synced, and the
+// full history stays in git (any old version can be restored).
+const GIT_DIR = path.join(SYNC_HOME, 'repo');
+const GIT_BRANCH = 'main';
+const GIT_TIMEOUT = 15 * 60 * 1000;
+function gitEnv() { return { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', LC_ALL: 'C' }; }
+function gitRaw(args, opts = {}) {
+  return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: gitEnv(), windowsHide: true, maxBuffer: 256 * 1024 * 1024, ...opts });
+}
+function git(args, opts) { return gitRaw(['-C', GIT_DIR, ...args], opts); }
+function gitMsg(e) {
+  const t = `${e?.stderr || ''}${e?.stdout || ''}`.trim() || e?.message || String(e);
+  return t.split('\n').filter(Boolean).slice(-3).join(' / ');
+}
+function gitAvailable() { try { gitRaw(['--version']); return true; } catch { return false; } }
+function checkGitRemote(url) {
+  if (!gitAvailable()) throw new Error('git이 설치되어 있지 않습니다 (macOS: xcode-select --install, Windows: Git for Windows 설치).');
+  try { gitRaw(['ls-remote', '--heads', url], { timeout: 120000 }); }
+  catch (e) { throw new Error(`저장소에 접근할 수 없습니다: ${gitMsg(e)} — 주소와 이 PC의 git 로그인(GitHub 자격 증명)을 확인하세요.`); }
+}
+function gitHasRef(ref) { try { git(['rev-parse', '--verify', '--quiet', ref]); return true; } catch { return false; } }
+function gitCommitAll(msg) {
+  git(['add', '-A']);
+  if (!git(['status', '--porcelain']).trim()) return false;
+  git(['commit', '-q', '--no-verify', '-m', msg]);
+  return true;
+}
+function gitPull() {
+  try { git(['fetch', '--quiet', 'origin'], { timeout: GIT_TIMEOUT }); }
+  catch (e) { throw new Error(`저장소에서 받지 못했습니다 (네트워크/로그인 확인): ${gitMsg(e)}`); }
+  if (!gitHasRef(`origin/${GIT_BRANCH}`)) return; // empty remote: this device publishes first
+  if (!gitHasRef('HEAD')) { git(['checkout', '-q', '-B', GIT_BRANCH, `origin/${GIT_BRANCH}`]); return; }
+  try {
+    // "-X ours" = on the rare add/add race (e.g. store.json) keep the upstream copy so all PCs agree
+    git(['rebase', '-q', '-X', 'ours', `origin/${GIT_BRANCH}`]);
+  } catch (e) {
+    try { git(['rebase', '--abort']); } catch {}
+    throw new Error(`저장소 변경을 합치지 못했습니다: ${gitMsg(e)}`);
+  }
+}
+function gitPrepare(cfg, progress) {
+  if (!gitAvailable()) throw new Error('git이 설치되어 있지 않습니다 (macOS: xcode-select --install, Windows: Git for Windows 설치).');
+  if (fs.existsSync(path.join(GIT_DIR, '.git'))) {
+    let cur = ''; try { cur = git(['remote', 'get-url', 'origin']).trim(); } catch {}
+    if (cur !== cfg.gitRemote) fs.renameSync(GIT_DIR, `${GIT_DIR}-old-${now()}`); // remote changed: keep old clone aside
+  }
+  if (!fs.existsSync(path.join(GIT_DIR, '.git'))) {
+    if (fs.existsSync(GIT_DIR)) fs.renameSync(GIT_DIR, `${GIT_DIR}-old-${now()}`);
+    progress('저장소 받는 중 (처음 한 번)...');
+    try { gitRaw(['clone', '--quiet', cfg.gitRemote, GIT_DIR], { timeout: GIT_TIMEOUT }); }
+    catch (e) { throw new Error(`저장소를 받지 못했습니다: ${gitMsg(e)}`); }
+  }
+  // repo-local settings: byte-exact files (content hashes!), readable names, a commit identity
+  git(['config', 'core.autocrlf', 'false']);
+  git(['config', 'core.quotepath', 'false']);
+  git(['config', 'user.name', `aside-sync (${cfg.deviceName})`]);
+  git(['config', 'user.email', 'aside-sync@localhost']);
+  if (!gitHasRef('HEAD')) git(['symbolic-ref', 'HEAD', `refs/heads/${GIT_BRANCH}`]);
+  const ga = path.join(GIT_DIR, '.gitattributes');
+  if (!fs.existsSync(ga)) fs.writeFileSync(ga, '* -text\n');
+  gitCommitAll(`aside-sync: ${cfg.deviceName} (이전 동기화 마무리)`); // leftovers of an interrupted run
+  progress('저장소에서 변경 받는 중...');
+  gitPull();
+}
+function gitPublish(cfg, res, progress) {
+  gitCommitAll(`aside-sync: ${cfg.deviceName} · 채팅 ↑${res.sessions.uploaded} ↓${res.sessions.downloaded} · 파일 ↑${res.files.uploaded} ↓${res.files.downloaded}`);
+  if (gitHasRef(`origin/${GIT_BRANCH}`) && git(['rev-list', '--count', `origin/${GIT_BRANCH}..HEAD`]).trim() === '0') return false;
+  if (!gitHasRef('HEAD')) return false;
+  progress('저장소에 올리는 중...');
+  for (let i = 0; ; i++) {
+    try { git(['push', '-q', 'origin', `HEAD:refs/heads/${GIT_BRANCH}`], { timeout: GIT_TIMEOUT }); return true; }
+    catch (e) {
+      const m = gitMsg(e);
+      if (i < 3 && /rejected|non-fast-forward|fetch first/i.test(m)) { gitPull(); continue; } // another PC pushed meanwhile
+      throw new Error(`저장소에 올리지 못했습니다 (다음 동기화 때 다시 시도): ${m}`);
+    }
+  }
+}
 
 function macPlistPath() { return path.join(os.homedir(), 'Library', 'LaunchAgents', `${SCHED_LABEL}.plist`); }
 
@@ -969,8 +1099,9 @@ function status() {
   let accountDir = null; let accountError = null;
   try { accountDir = resolveAccountDir(cfg, st); } catch (e) { accountError = e.message; }
   let devices = [];
-  if (cfg.syncDir) {
-    const store = new Store(cfg.syncDir);
+  const storeDir = cfg.gitRemote ? GIT_DIR : cfg.syncDir;
+  if (storeDir && fs.existsSync(storeDir)) {
+    const store = new Store(storeDir);
     devices = store.readDeviceFiles('devices');
   }
   let scheduler = null;
@@ -1041,7 +1172,7 @@ async function cliMain(args) {
     const trigger = (args.find((a) => a.startsWith('--trigger=')) || '--trigger=cli').split('=')[1];
     if (args.includes('--allow-mass-delete')) process.env.ASIDE_SYNC_ALLOW_MASS_DELETE = '1';
     if (args.includes('--keep-local')) process.env.ASIDE_SYNC_KEEP_LOCAL = '1';
-    if (trigger === 'scheduler' && !loadConfig().syncDir) { console.log('syncDir not set, skipping'); process.exit(0); }
+    if (trigger === 'scheduler' && !loadConfig().syncDir && !loadConfig().gitRemote) { console.log('syncDir not set, skipping'); process.exit(0); }
     const r = await runSync((m) => console.log('·', m), trigger);
     console.log(JSON.stringify(r, null, 2));
     process.exit(r.ok ? 0 : 1);

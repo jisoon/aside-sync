@@ -8,7 +8,11 @@
 
   <div id="hostErr" class="card err" hidden></div>
 
-  <h2>동기화 폴더</h2>
+  <h2>GitHub 저장소 (권장)</h2>
+  <input type="text" id="gitRemote" placeholder="https://github.com/내아이디/aside-sync-data.git">
+  <div class="muted" style="margin-top:4px">반드시 <b>비공개(Private)</b> 저장소를 쓰세요. 채팅 원문이 올라갑니다. 지정하면 아래 동기화 폴더 대신 이 저장소로 동기화합니다 (git 필요).</div>
+
+  <h2>동기화 폴더 (GitHub 대신 클라우드 폴더를 쓸 때)</h2>
   <input type="text" id="syncDir" placeholder="/Users/me/Library/CloudStorage/GoogleDrive-.../My Drive/AsideSync">
   <div class="muted" style="margin-top:4px">감지된 클라우드 폴더 (클릭해서 선택):</div>
   <div class="chips" id="clouds"></div>
@@ -18,7 +22,7 @@
 
   <h2>Aside 계정</h2>
   <select id="accountDir"></select>
-  <div class="muted" style="margin-top:4px">비워두면 가장 최근에 사용한 계정을 자동 선택합니다.</div>
+  <div class="muted" style="margin-top:4px">계정 폴더가 하나면 자동으로 고정됩니다. 여러 개면 반드시 선택하세요.</div>
 
   <h2>자동 동기화</h2>
   <div class="row">

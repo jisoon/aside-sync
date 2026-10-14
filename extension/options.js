@@ -19,6 +19,7 @@ async function load() {
   }
   const c = st.config;
   $('syncDir').value = c.syncDir || '';
+  $('gitRemote').value = c.gitRemote || '';
   $('deviceName').value = c.deviceName || '';
   $('autoSyncMinutes').value = c.autoSyncMinutes;
   showSched(st.scheduler, c.autoSyncMinutes);
@@ -29,7 +30,7 @@ async function load() {
 
   const det = await host({ type: 'detect' });
   const sel = $('accountDir');
-  sel.innerHTML = '<option value="">자동 선택</option>';
+  sel.innerHTML = '<option value="">(선택 안 함)</option>';
   for (const a of det.accounts || []) {
     const o = document.createElement('option');
     o.value = a.dir;
@@ -53,8 +54,9 @@ async function save() {
   for (const el of document.querySelectorAll('[data-inc]')) include[el.dataset.inc] = el.checked;
   const config = {
     syncDir: $('syncDir').value.trim(),
+    gitRemote: $('gitRemote').value.trim(),
     deviceName: $('deviceName').value.trim() || undefined,
-    accountDir: $('accountDir').value,
+    accountDir: $('accountDir').value || undefined, // keep the pinned account unless one is chosen
     autoSyncMinutes: Number($('autoSyncMinutes').value) || 0,
     maxFileMB: Number($('maxFileMB').value) || 100,
     include,

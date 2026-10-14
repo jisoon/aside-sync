@@ -24,6 +24,7 @@ function showResult(r) {
   if (r.sessions.pending) notes.push(`클라우드 업로드 대기 ${r.sessions.pending}개`);
   if (r.sessions.conflicts || r.files.conflicts) notes.push(`충돌 ${r.sessions.conflicts + r.files.conflicts}건 (최신 쪽 유지)`);
   if (r.sessions.downloaded) notes.push('새 채팅이 목록에 안 보이면 Aside를 재시작하세요');
+  if (r.files.merged) notes.push(`양쪽에서 고친 파일 ${r.files.merged}개를 줄 단위로 합침`);
   if (r.files.deleted) notes.push(`다른 PC에서 지운 파일 ${r.files.deleted}개 삭제 (백업: ~/.aside-sync/conflicts)`);
   for (const n of r.notes || []) notes.push(n);
   $('notes').textContent = notes.join(' · ');
@@ -42,8 +43,9 @@ async function refresh() {
   }
   const c = st.config;
   $('device').textContent = c.deviceName;
-  $('dir').textContent = c.syncDir || '미설정';
-  $('dir').title = c.syncDir;
+  const target = c.gitRemote ? c.gitRemote.replace(/^https?:\/\/(www\.)?/, '').replace(/\.git$/, '') : c.syncDir;
+  $('dir').textContent = target || '미설정';
+  $('dir').title = c.gitRemote || c.syncDir;
 
   const sc = st.scheduler || {};
   if (!c.autoSyncMinutes) $('sched').textContent = '꺼짐';
@@ -54,14 +56,14 @@ async function refresh() {
   $('fixSched').hidden = !!sc.ok || !c.autoSyncMinutes;
 
   const r = st.lastResult;
-  if (!c.syncDir) setState('bad', '동기화 폴더 미설정');
+  if (!c.syncDir && !c.gitRemote) setState('bad', '동기화 대상 미설정');
   else if (st.running || busy) setState('run', '동기화 중...');
   else if (r && !r.ok) setState('bad', '오류');
   else if (r) setState('ok', '정상');
   else setState('', '아직 동기화 안 함');
   if (r?.errors?.length && !busy) { $('msg').className = 'err'; $('msg').textContent = r.errors.slice(0, 3).join('\n'); }
   showResult(r);
-  $('sync').disabled = !c.syncDir || busy || st.running;
+  $('sync').disabled = !(c.syncDir || c.gitRemote) || busy || st.running;
   $('sync').textContent = busy || st.running ? '동기화 중...' : '지금 동기화';
 
   $('devices').innerHTML = '';
