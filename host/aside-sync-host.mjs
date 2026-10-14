@@ -21,7 +21,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const VERSION = '1.1.0';
+const VERSION = '1.1.1';
 const HOST_FILE = fileURLToPath(import.meta.url);
 const SCHED_LABEL = process.env.ASIDE_SYNC_LABEL || 'com.aside.sync';
 const WIN_TASK = process.env.ASIDE_SYNC_LABEL || 'AsideSync';
@@ -317,6 +317,16 @@ class SyncRun {
     if (!this.cfg.syncDir) throw new Error('동기화 폴더(syncDir)가 설정되지 않았습니다. 확장 옵션에서 지정하세요.');
     ensureDir(this.cfg.syncDir);
     this.store.init();
+    // Guard: if the sync folder/store changed (different path, or cloud replaced/renamed the folder),
+    // the saved 3-way base is meaningless. Reset it so nothing is treated as "deleted on the other side".
+    const storeMeta = readJson(this.store.p('store.json'), {});
+    const storeId = `${path.resolve(this.cfg.syncDir)}|${storeMeta.createdAt || ''}`;
+    if (this.state.storeId && this.state.storeId !== storeId) {
+      this.state.sessions = {}; this.state.files = {}; this.state.settings = null;
+      this.res.notes.push('동기화 폴더가 바뀌어 비교 기준을 초기화했습니다 (첫 동기화처럼 처리, 삭제 없음).');
+      log('store changed:', this.state.storeId, '->', storeId);
+    }
+    this.state.storeId = storeId;
     this.progress(`계정 폴더: ${this.accountDir}`);
     this.db = openDb(this.accountDir);
     try {
@@ -589,6 +599,13 @@ class SyncRun {
       }
     }
     const local = this.localFiles();
+    // Guard: if this device's own manifest is missing from the store (new/replaced folder, cloud not synced yet),
+    // never trust the old base -> treat as first sync so local files are pushed, not deleted.
+    const ownFound = this.store.readDeviceFiles('manifests').some((m) => m.deviceId === this.cfg.deviceId);
+    if (!ownFound && Object.keys(this.state.files).length) {
+      this.state.files = {};
+      this.res.notes.push('동기화 폴더에 이 PC의 파일 목록이 없어 첫 동기화처럼 처리했습니다 (삭제 없음).');
+    }
     const base = this.state.files;
     const all = new Set([...local.keys(), ...remote.keys(), ...Object.keys(base)]);
     let manifestDirty = false;
