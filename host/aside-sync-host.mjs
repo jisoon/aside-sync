@@ -21,7 +21,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const VERSION = '1.1.4';
+const VERSION = '1.1.5';
 const HOST_FILE = fileURLToPath(import.meta.url);
 const SCHED_LABEL = process.env.ASIDE_SYNC_LABEL || 'com.aside.sync';
 const WIN_TASK = process.env.ASIDE_SYNC_LABEL || 'AsideSync';
@@ -722,7 +722,7 @@ class SyncRun {
             if (R.mtime) try { fs.utimesSync(abs, new Date(), new Date(R.mtime)); } catch {}
             base[rel] = S; this.res.files.downloaded++;
           } else {
-            pendingDeletes.push({ abs, rel });
+            pendingDeletes.push({ abs, rel, L, lInfo });
           }
         }
       } catch (e) { this.err(`file ${rel}`, e); }
@@ -732,8 +732,18 @@ class SyncRun {
     if (pendingDeletes.length) {
       const limit = Math.max(5, Math.ceil(local.size * 0.2));
       const allow = process.env.ASIDE_SYNC_ALLOW_MASS_DELETE === '1';
-      if (pendingDeletes.length > limit && !allow) {
-        this.res.errors.push(`다른 PC에서 파일 ${pendingDeletes.length}개가 지워진 것으로 보이지만 안전을 위해 삭제하지 않았습니다 (한도 ${limit}개). 의도한 삭제라면 'sync --allow-mass-delete'로 실행하세요.`);
+      const keep = process.env.ASIDE_SYNC_KEEP_LOCAL === '1';
+      if (keep) {
+        // resolve the other way: keep this PC's copies and re-upload them (restores them on the other PCs too)
+        for (const { rel, L, lInfo } of pendingDeletes) {
+          if (!L) continue;
+          myManifest.entries[rel] = { hash: L, size: lInfo.size, mtime: Math.round(lInfo.mtimeMs), at: now() };
+          this.store.putBlob(L, lInfo.size, path.join(this.accountDir, ...rel.split('/')));
+          base[rel] = L; manifestDirty = true; this.res.files.uploaded++;
+        }
+        this.res.notes.push(`다른 PC에서 지운 파일 ${pendingDeletes.length}개를 지우지 않고 다시 올렸습니다 (--keep-local).`);
+      } else if (pendingDeletes.length > limit && !allow) {
+        this.res.errors.push(`다른 PC에서 파일 ${pendingDeletes.length}개가 지워진 것으로 보이지만 안전을 위해 삭제하지 않았습니다 (한도 ${limit}개). 삭제를 받아들이려면 'sync --allow-mass-delete', 이 PC 파일로 되살리려면 'sync --keep-local'로 실행하세요. 목록: ~/.aside-sync/sync.log`);
         log('mass delete blocked:', pendingDeletes.map((d) => d.rel).join(', '));
       } else {
         for (const { abs, rel } of pendingDeletes) {
@@ -1015,6 +1025,7 @@ async function cliMain(args) {
   if (cmd === 'sync') {
     const trigger = (args.find((a) => a.startsWith('--trigger=')) || '--trigger=cli').split('=')[1];
     if (args.includes('--allow-mass-delete')) process.env.ASIDE_SYNC_ALLOW_MASS_DELETE = '1';
+    if (args.includes('--keep-local')) process.env.ASIDE_SYNC_KEEP_LOCAL = '1';
     if (trigger === 'scheduler' && !loadConfig().syncDir) { console.log('syncDir not set, skipping'); process.exit(0); }
     const r = await runSync((m) => console.log('·', m), trigger);
     console.log(JSON.stringify(r, null, 2));
