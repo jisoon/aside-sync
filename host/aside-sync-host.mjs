@@ -21,7 +21,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const VERSION = '1.1.2';
+const VERSION = '1.1.3';
 const HOST_FILE = fileURLToPath(import.meta.url);
 const SCHED_LABEL = process.env.ASIDE_SYNC_LABEL || 'com.aside.sync';
 const WIN_TASK = process.env.ASIDE_SYNC_LABEL || 'AsideSync';
@@ -240,30 +240,61 @@ class Store {
     if (m.schema && m.schema > SCHEMA) throw new Error('동기화 폴더가 더 최신 버전의 Aside Sync로 만들어졌습니다. 이 PC의 Aside Sync를 업데이트하세요.');
   }
   p(...parts) { return path.join(this.root, ...parts); }
-  blobPath(hash) { return this.p('blobs', hash.slice(0, 2), hash); }
-  hasBlob(hash, size) {
-    try { return fs.statSync(this.blobPath(hash)).size === size; } catch { return false; }
+  // Cloud drives (esp. Google Drive) allow several folders with the same name. When two PCs
+  // create e.g. "blobs/a6" before seeing each other's, the drive client shows "a6 2", "a6 3"...
+  // Every read therefore treats "<name>" and "<name> N" as one logical folder.
+  resolveDirs(...parts) {
+    let dirs = [this.root];
+    for (const part of parts) {
+      const re = new RegExp('^' + escapeRe(part) + '( \\d+)?$');
+      const next = [];
+      for (const d of dirs) {
+        let ents; try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { continue; }
+        for (const e of ents) if (e.isDirectory() && re.test(e.name)) next.push(path.join(d, e.name));
+      }
+      dirs = next;
+    }
+    return dirs;
   }
+  blobPath(hash) { return this.p('blobs', hash.slice(0, 2), hash); }
+  findBlob(hash, size) {
+    for (const d of this.resolveDirs('blobs', hash.slice(0, 2))) {
+      const p = path.join(d, hash);
+      try { const st = fs.statSync(p); if (st.isFile() && (size == null || st.size === size)) return p; } catch {}
+    }
+    return null;
+  }
+  hasBlob(hash, size) { return !!this.findBlob(hash, size); }
   putBlob(hash, size, src) {
     if (this.hasBlob(hash, size)) return false;
     copyAtomic(src, this.blobPath(hash));
     return true;
   }
   getBlob(hash, dest) {
-    const src = this.blobPath(hash);
+    const src = this.findBlob(hash) || this.blobPath(hash);
     const tmp = `${dest}.${process.pid}.aside-sync-tmp`;
     ensureDir(path.dirname(dest));
     fs.copyFileSync(src, tmp);
     if (hashFileSync(tmp) !== hash) { fs.rmSync(tmp, { force: true }); throw new Error(`blob hash mismatch ${hash}`); }
     fs.renameSync(tmp, dest);
   }
-  listDir(...parts) { try { return fs.readdirSync(this.p(...parts)); } catch { return []; } }
-  // per-device json files: dir/<deviceId>.json
+  // entry names across duplicate folders; duplicate sub-folder suffixes (" 2") are folded
+  listDir(...parts) {
+    const out = new Set();
+    for (const d of this.resolveDirs(...parts)) {
+      let ents; try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { continue; }
+      for (const e of ents) out.add(e.isDirectory() ? e.name.replace(/ \d+$/, '') : e.name);
+    }
+    return [...out];
+  }
+  // per-device json files: dir/<deviceId>.json (read from every duplicate folder)
   readDeviceFiles(...parts) {
-    return this.listDir(...parts)
-      .filter((f) => f.endsWith('.json'))
-      .map((f) => readJson(this.p(...parts, f)))
-      .filter(Boolean);
+    const out = [];
+    for (const d of this.resolveDirs(...parts)) {
+      let names; try { names = fs.readdirSync(d); } catch { continue; }
+      for (const n of names) if (n.endsWith('.json')) { const j = readJson(path.join(d, n)); if (j) out.push(j); }
+    }
+    return out;
   }
 }
 
@@ -695,12 +726,15 @@ class SyncRun {
     }
     for (const m of this.store.readDeviceFiles('manifests')) for (const e of Object.values(m.entries || {})) if (e.hash) refs.add(e.hash);
     for (const pre of this.store.listDir('blobs')) {
-      for (const h of this.store.listDir('blobs', pre)) {
-        if (refs.has(h)) continue;
-        const p = this.store.p('blobs', pre, h);
-        try {
-          if (now() - fs.statSync(p).mtimeMs > KEEP_MS) { fs.rmSync(p); this.res.blobsRemoved++; }
-        } catch {}
+      for (const d of this.store.resolveDirs('blobs', pre)) {
+        let hs; try { hs = fs.readdirSync(d); } catch { continue; }
+        for (const h of hs) {
+          if (refs.has(h)) continue;
+          const p = path.join(d, h);
+          try {
+            if (now() - fs.statSync(p).mtimeMs > KEEP_MS) { fs.rmSync(p); this.res.blobsRemoved++; }
+          } catch {}
+        }
       }
     }
   }
