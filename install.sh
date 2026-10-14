@@ -33,7 +33,7 @@ if [ -z "$CUR" ]; then
     echo "동기화 폴더를 선택하세요 (모든 PC에서 같은 클라우드를 골라야 합니다):"
     i=1; for c in "${CANDS[@]}"; do echo "  $i) ${c%%$'\t'*}  -> ${c#*$'\t'}"; i=$((i+1)); done
     echo "  0) 나중에 확장 옵션에서 직접 지정"
-    printf "번호 [1]: "; read -r n </dev/tty || n=1; n="${n:-1}"
+    printf "번호 [1]: "; { read -r n </dev/tty; } 2>/dev/null || n=1; n="${n:-1}"
     if [ "$n" != "0" ] && [ "$n" -ge 1 ] 2>/dev/null && [ "$n" -le ${#CANDS[@]} ]; then CHOSEN="${CANDS[$((n-1))]#*$'\t'}"; fi
   fi
   if [ -n "$CHOSEN" ]; then
