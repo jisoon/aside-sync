@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ko">
+<head><meta charset="utf-8"><link rel="stylesheet" href="style.css">
+<style>body{width:340px;padding:14px}</style></head>
+<body>
+  <div class="row">
+    <h1><img src="icons/48.png" alt="">Aside Sync</h1>
+    <a href="#" id="opts" class="muted">설정</a>
+  </div>
+
+  <div class="card" id="statusCard">
+    <div class="row"><span>이 PC</span><b id="device">-</b></div>
+    <div class="row"><span>마지막 동기화</span><span id="last">-</span></div>
+    <div class="row"><span>동기화 폴더</span><span id="dir" class="muted" style="max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl">-</span></div>
+  </div>
+
+  <div class="card">
+    <div class="muted" style="margin-bottom:6px">최근 결과 (채팅 / 파일)</div>
+    <div class="grid">
+      <div><b id="sUp">0</b><span class="muted">채팅 ↑</span></div>
+      <div><b id="sDown">0</b><span class="muted">채팅 ↓</span></div>
+      <div><b id="fUp">0</b><span class="muted">파일 ↑</span></div>
+      <div><b id="fDown">0</b><span class="muted">파일 ↓</span></div>
+    </div>
+    <div id="notes" class="muted" style="margin-top:6px"></div>
+  </div>
+
+  <div id="msg" style="margin-top:10px;min-height:18px" class="muted"></div>
+  <button id="sync" class="primary" style="width:100%;margin-top:6px">지금 동기화</button>
+
+  <h2>연결된 PC</h2>
+  <div id="devices" class="muted">-</div>
+  <script src="popup.js"></script>
+</body>
+</html>

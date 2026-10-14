@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ko">
+<head><meta charset="utf-8"><title>Aside Sync 설정</title><link rel="stylesheet" href="style.css">
+<style>body{max-width:640px;margin:0 auto;padding:28px 20px}</style></head>
+<body>
+  <h1><img src="icons/48.png" alt="">Aside Sync 설정</h1>
+  <p class="muted">모든 PC에서 <b>같은 클라우드 폴더</b>(Google Drive, iCloud, Dropbox, OneDrive, NAS 등)를 지정하면 채팅 기록과 메모리가 서로 동기화됩니다.</p>
+
+  <div id="hostErr" class="card err" hidden></div>
+
+  <h2>동기화 폴더</h2>
+  <input type="text" id="syncDir" placeholder="/Users/me/Library/CloudStorage/GoogleDrive-.../My Drive/AsideSync">
+  <div class="muted" style="margin-top:4px">감지된 클라우드 폴더 (클릭해서 선택):</div>
+  <div class="chips" id="clouds"></div>
+
+  <h2>이 PC 이름</h2>
+  <input type="text" id="deviceName">
+
+  <h2>Aside 계정</h2>
+  <select id="accountDir"></select>
+  <div class="muted" style="margin-top:4px">비워두면 가장 최근에 사용한 계정을 자동 선택합니다.</div>
+
+  <h2>자동 동기화</h2>
+  <div class="row">
+    <span>주기(분, 0이면 끔)</span>
+    <input type="number" id="autoSyncMinutes" min="0" style="width:100px">
+  </div>
+  <label class="chk"><input type="checkbox" id="syncOnStartup"> 크롬 시작 시 동기화</label>
+
+  <h2>동기화 대상</h2>
+  <label class="chk"><input type="checkbox" data-inc="sessions"> <span><b>채팅 기록</b> <span class="muted">대화 내용, 제목, 고정/보관 상태</span></span></label>
+  <label class="chk"><input type="checkbox" data-inc="artifacts"> <span>채팅 산출물/첨부 파일 <span class="muted">(artifacts, attachments)</span></span></label>
+  <label class="chk"><input type="checkbox" data-inc="projects"> <span>프로젝트</span></label>
+  <label class="chk"><input type="checkbox" data-inc="memory"> <span>메모리</span></label>
+  <label class="chk"><input type="checkbox" data-inc="userSkills"> <span>내가 만든 스킬 <span class="muted">(skills/user)</span></span></label>
+  <label class="chk"><input type="checkbox" data-inc="persona"> <span>AGENTS.md / SOUL.md</span></label>
+  <label class="chk"><input type="checkbox" data-inc="settings"> <span>설정 (settings.json) <span class="muted">MCP·비밀번호관리자·커스텀모델 키 등 민감/기기별 항목은 제외</span></span></label>
+  <div class="row" style="margin-top:6px">
+    <span>파일 최대 크기(MB)</span>
+    <input type="number" id="maxFileMB" min="1" style="width:100px">
+  </div>
+
+  <div style="margin-top:22px;display:flex;gap:8px">
+    <button class="primary" id="save">저장</button>
+    <button id="saveSync">저장 후 지금 동기화</button>
+  </div>
+  <div id="msg" style="margin-top:10px"></div>
+
+  <div class="card muted" style="margin-top:22px">
+    <div>로그/상태: <code id="home"></code></div>
+    <div>호스트: <span id="ver"></span></div>
+  </div>
+  <script src="options.js"></script>
+</body>
+</html>
