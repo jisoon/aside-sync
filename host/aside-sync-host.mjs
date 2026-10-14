@@ -21,7 +21,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const VERSION = '1.1.1';
+const VERSION = '1.1.2';
 const HOST_FILE = fileURLToPath(import.meta.url);
 const SCHED_LABEL = process.env.ASIDE_SYNC_LABEL || 'com.aside.sync';
 const WIN_TASK = process.env.ASIDE_SYNC_LABEL || 'AsideSync';
@@ -36,7 +36,7 @@ const SCHEMA = 1;
 
 // settings.json keys that are device specific or contain secrets -> never synced
 const SETTINGS_EXCLUDE = ['routineDeviceId', 'externalPasswordManagers', 'cli', 'mcp', 'customModels', 'analytics'];
-const FILE_EXCLUDE = [/^memory\/memory-index-local\.json$/, /(^|\/)\.DS_Store$/, /(^|\/)Thumbs\.db$/, /\.aside-sync-tmp$/];
+const FILE_EXCLUDE = [/^memory\/memory-index-local\.json$/, /^memory\/\.local-memory\//, /(^|\/)\.DS_Store$/, /(^|\/)Thumbs\.db$/, /\.aside-sync-tmp$/];
 // columns that only make sense on the machine that owns the browser
 const ROW_FP_IGNORE = ['active_tab_target_id', 'browser_binding'];
 
@@ -767,11 +767,14 @@ function applySchedule(cfg = loadConfig()) {
   if (process.platform === 'darwin') {
     const plist = macPlistPath();
     const domain = `gui/${process.getuid()}`;
-    try { run('launchctl', ['bootout', `${domain}/${SCHED_LABEL}`]); } catch {}
-    if (!minutes) { fs.rmSync(plist, { force: true }); return schedulerStatus(cfg); }
+    if (!minutes) {
+      try { run('launchctl', ['bootout', `${domain}/${SCHED_LABEL}`]); } catch {}
+      fs.rmSync(plist, { force: true });
+      return schedulerStatus(cfg);
+    }
     const env = process.env.ASIDE_SYNC_HOME ? `<key>EnvironmentVariables</key><dict><key>ASIDE_SYNC_HOME</key><string>${xmlEsc(process.env.ASIDE_SYNC_HOME)}</string></dict>` : '';
     ensureDir(path.dirname(plist));
-    fs.writeFileSync(plist, `<?xml version="1.0" encoding="UTF-8"?>
+    const plistText = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key><string>${xmlEsc(SCHED_LABEL)}</string>
@@ -784,7 +787,11 @@ function applySchedule(cfg = loadConfig()) {
 <key>StandardErrorPath</key><string>${xmlEsc(path.join(SYNC_HOME, 'scheduler.log'))}</string>
 ${env}
 </dict></plist>
-`);
+`;
+    let prev = null; try { prev = fs.readFileSync(plist, 'utf8'); } catch {}
+    if (prev === plistText && schedulerStatus(cfg).installed) return schedulerStatus(cfg); // already running as-is
+    try { run('launchctl', ['bootout', `${domain}/${SCHED_LABEL}`]); } catch {}
+    fs.writeFileSync(plist, plistText);
     try { run('launchctl', ['bootstrap', domain, plist]); }
     catch (e1) {
       try { run('launchctl', ['load', '-w', plist]); }
