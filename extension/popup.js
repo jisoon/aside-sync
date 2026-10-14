@@ -17,13 +17,15 @@ function showResult(r) {
   $('sUp').textContent = r.sessions.uploaded;
   $('sDown').textContent = r.sessions.downloaded;
   $('fUp').textContent = r.files.uploaded;
-  $('fDown').textContent = r.files.downloaded + r.files.deleted;
+  $('fDown').textContent = r.files.downloaded;
   $('last').textContent = `${ago(r.finishedAt)} · ${TRIGGER[r.trigger] || r.trigger || '-'}`;
   const notes = [];
   if (r.sessions.skippedRunning) notes.push(`실행 중인 채팅 ${r.sessions.skippedRunning}개는 다음에 동기화`);
   if (r.sessions.pending) notes.push(`클라우드 업로드 대기 ${r.sessions.pending}개`);
   if (r.sessions.conflicts || r.files.conflicts) notes.push(`충돌 ${r.sessions.conflicts + r.files.conflicts}건 (최신 쪽 유지)`);
   if (r.sessions.downloaded) notes.push('새 채팅이 목록에 안 보이면 Aside를 재시작하세요');
+  if (r.files.deleted) notes.push(`다른 PC에서 지운 파일 ${r.files.deleted}개 삭제 (백업: ~/.aside-sync/conflicts)`);
+  for (const n of r.notes || []) notes.push(n);
   $('notes').textContent = notes.join(' · ');
 }
 

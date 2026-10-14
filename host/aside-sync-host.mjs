@@ -21,7 +21,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const VERSION = '1.1.3';
+const VERSION = '1.1.4';
 const HOST_FILE = fileURLToPath(import.meta.url);
 const SCHED_LABEL = process.env.ASIDE_SYNC_LABEL || 'com.aside.sync';
 const WIN_TASK = process.env.ASIDE_SYNC_LABEL || 'AsideSync';
@@ -46,6 +46,28 @@ const toPosix = (p) => p.split(path.sep).join('/');
 const now = () => Date.now();
 
 function ensureDir(d) { fs.mkdirSync(d, { recursive: true }); }
+
+// Cloud provider mount root for paths under ~/Library/CloudStorage/<Provider>/...
+function cloudMountRoot(dir) {
+  const cs = path.join(os.homedir(), 'Library', 'CloudStorage');
+  const rel = path.relative(cs, path.resolve(dir));
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  return path.join(cs, rel.split(path.sep)[0]);
+}
+// The sync folder must already exist (it lives in a cloud drive). Creating it during a sync while the
+// cloud client is signed out / paused produces a plain local folder that is not linked to the cloud;
+// when the client reconnects it is uploaded as a second folder ("AsideSync 2") and the PCs drift apart.
+// So: create only when the user explicitly sets the folder (create=true), never from a sync run.
+function checkSyncDir(dir, { create = false } = {}) {
+  const abs = path.resolve(dir);
+  if (fs.existsSync(abs)) return abs;
+  const mount = cloudMountRoot(abs);
+  if (mount && !fs.existsSync(mount)) throw new Error(`클라우드 드라이브가 연결되어 있지 않습니다 (${path.basename(mount)}). 클라우드 앱 로그인 상태를 확인하세요.`);
+  if (!create) throw new Error(`동기화 폴더를 찾을 수 없습니다: ${abs} — 클라우드 앱(Google Drive 등)이 로그아웃/일시중지됐거나 폴더가 이동·삭제됐을 수 있습니다. 클라우드와 연결 안 된 폴더가 생기는 것을 막기 위해 자동으로 만들지 않습니다. 확장 옵션에서 폴더를 다시 지정하세요.`);
+  if (!fs.existsSync(path.dirname(abs))) throw new Error(`상위 폴더가 없습니다: ${path.dirname(abs)}`);
+  ensureDir(abs);
+  return abs;
+}
 
 function log(...args) {
   try {
@@ -133,6 +155,7 @@ function loadConfig() {
 }
 
 function saveConfig(patch) {
+  if (patch.syncDir) checkSyncDir(patch.syncDir, { create: true });
   const cfg = loadConfig();
   const next = { ...cfg, ...patch, include: { ...cfg.include, ...(patch.include || {}) } };
   next.deviceId = cfg.deviceId; // immutable
@@ -341,12 +364,27 @@ class SyncRun {
     };
   }
 
+  // Stall detection without cloud APIs: every device publishes which lastSyncAt of each peer it has seen.
+  // If an active peer keeps syncing but has not seen our updates for over an hour (while we did publish
+  // newer ones), one side's cloud client is not uploading/downloading -> surface it instead of "ok".
+  checkPeers(peers) {
+    const H = 3600 * 1000;
+    const myPrev = this.state.lastPublishedAt || 0;
+    for (const p of peers) {
+      const seenMe = p.seen?.[this.cfg.deviceId];
+      if (!seenMe || !p.lastSyncAt || now() - p.lastSyncAt > 24 * H) continue;
+      if (p.lastSyncAt - seenMe > H && myPrev - seenMe > H) {
+        this.res.errors.push(`'${p.deviceName || p.deviceId}'이(가) 1시간 넘게 이 PC의 변경을 받지 못하고 있습니다. 두 PC의 클라우드 앱(Google Drive 등)이 '최신 상태'인지 확인하고, 아니면 앱을 재시작하거나 계정을 다시 연결하세요.`);
+      }
+    }
+  }
+
   progress(msg) { log(msg); this.onProgress(msg); }
   err(where, e) { const m = `${where}: ${e?.message || e}`; log('ERROR', m, e?.stack || ''); this.res.errors.push(m); }
 
   async run() {
     if (!this.cfg.syncDir) throw new Error('동기화 폴더(syncDir)가 설정되지 않았습니다. 확장 옵션에서 지정하세요.');
-    ensureDir(this.cfg.syncDir);
+    checkSyncDir(this.cfg.syncDir);
     this.store.init();
     // Guard: if the sync folder/store changed (different path, or cloud replaced/renamed the folder),
     // the saved 3-way base is meaningless. Reset it so nothing is treated as "deleted on the other side".
@@ -366,9 +404,14 @@ class SyncRun {
       this.syncFiles();
       if (this.cfg.include.settings) this.syncSettings();
       this.gcBlobs();
+      const peers = this.store.readDeviceFiles('devices').filter((d) => d.deviceId && d.deviceId !== this.cfg.deviceId);
+      this.checkPeers(peers);
+      const lastSyncAt = now();
       writeJsonAtomic(this.store.p('devices', `${this.cfg.deviceId}.json`), {
-        deviceId: this.cfg.deviceId, deviceName: this.cfg.deviceName, platform: process.platform, version: VERSION, lastSyncAt: now(),
+        deviceId: this.cfg.deviceId, deviceName: this.cfg.deviceName, platform: process.platform, version: VERSION, lastSyncAt,
+        seen: Object.fromEntries(peers.map((p) => [p.deviceId, p.lastSyncAt])),
       });
+      this.state.lastPublishedAt = lastSyncAt;
       this.res.ok = this.res.errors.length === 0;
     } finally {
       try { this.db.close(); } catch {}
@@ -641,6 +684,7 @@ class SyncRun {
     const all = new Set([...local.keys(), ...remote.keys(), ...Object.keys(base)]);
     let manifestDirty = false;
     const conflictDir = path.join(SYNC_HOME, 'conflicts', new Date().toISOString().replace(/[:.]/g, '-'));
+    const pendingDeletes = [];
 
     for (const rel of all) {
       if (!this.inScope(rel)) continue;
@@ -678,10 +722,27 @@ class SyncRun {
             if (R.mtime) try { fs.utimesSync(abs, new Date(), new Date(R.mtime)); } catch {}
             base[rel] = S; this.res.files.downloaded++;
           } else {
-            fs.rmSync(abs, { force: true }); delete base[rel]; this.res.files.deleted++;
+            pendingDeletes.push({ abs, rel });
           }
         }
       } catch (e) { this.err(`file ${rel}`, e); }
+    }
+    // Safety net: a sync should rarely delete many files at once. A large batch almost always means the
+    // store looks empty/foreign (folder replaced, cloud not synced yet), not a real deletion on another PC.
+    if (pendingDeletes.length) {
+      const limit = Math.max(5, Math.ceil(local.size * 0.2));
+      const allow = process.env.ASIDE_SYNC_ALLOW_MASS_DELETE === '1';
+      if (pendingDeletes.length > limit && !allow) {
+        this.res.errors.push(`다른 PC에서 파일 ${pendingDeletes.length}개가 지워진 것으로 보이지만 안전을 위해 삭제하지 않았습니다 (한도 ${limit}개). 의도한 삭제라면 'sync --allow-mass-delete'로 실행하세요.`);
+        log('mass delete blocked:', pendingDeletes.map((d) => d.rel).join(', '));
+      } else {
+        for (const { abs, rel } of pendingDeletes) {
+          try {
+            if (fs.existsSync(abs)) copyAtomic(abs, path.join(conflictDir, 'deleted', ...rel.split('/')));
+            fs.rmSync(abs, { force: true }); delete base[rel]; this.res.files.deleted++;
+          } catch (e) { this.err(`file ${rel}`, e); }
+        }
+      }
     }
     if (manifestDirty) writeJsonAtomic(this.store.p('manifests', `${this.cfg.deviceId}.json`), { ...myManifest, deviceName: this.cfg.deviceName, updatedAt: now() });
   }
@@ -953,6 +1014,7 @@ async function cliMain(args) {
   const cmd = args[0] || 'status';
   if (cmd === 'sync') {
     const trigger = (args.find((a) => a.startsWith('--trigger=')) || '--trigger=cli').split('=')[1];
+    if (args.includes('--allow-mass-delete')) process.env.ASIDE_SYNC_ALLOW_MASS_DELETE = '1';
     if (trigger === 'scheduler' && !loadConfig().syncDir) { console.log('syncDir not set, skipping'); process.exit(0); }
     const r = await runSync((m) => console.log('·', m), trigger);
     console.log(JSON.stringify(r, null, 2));
