@@ -21,7 +21,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const VERSION = '1.3.0';
+const VERSION = '1.4.0';
 const CODE_REPO = process.env.ASIDE_SYNC_REPO || 'jisoon/aside-sync';
 const CODE_BRANCH = process.env.ASIDE_SYNC_BRANCH || 'main';
 const HOST_FILE = fileURLToPath(import.meta.url);
@@ -809,7 +809,9 @@ class SyncRun {
         }
       }
     }
-    if (manifestDirty) writeJsonAtomic(this.store.p('manifests', `${this.cfg.deviceId}.json`), { ...myManifest, deviceName: this.cfg.deviceName, updatedAt: now() });
+    // A download-only PC must still publish its (possibly empty) manifest: otherwise "own manifest missing"
+    // resets the 3-way base on every run -> no merges, and files deleted on other PCs get re-uploaded.
+    if (manifestDirty || !ownFound) writeJsonAtomic(this.store.p('manifests', `${this.cfg.deviceId}.json`), { ...myManifest, deviceName: this.cfg.deviceName, updatedAt: now() });
   }
 
   // ---------------- settings.json (opt-in)
@@ -896,13 +898,84 @@ function normalizeGitUrl(u) {
   return u;
 }
 
+// ---- token login (for PCs where git has no GitHub login yet)
+// The token is verified through a one-shot credential helper that reads it from the environment (never argv,
+// never a config file), then stored in the OS secure store keyed by host+path, so the PC's other github.com
+// credentials stay untouched. config.json only remembers which helper to ask, not the token.
+function fileHelper() { const file = path.join(SYNC_HOME, 'git-credentials'); return { helper: `store --file="${file}"`, label: `${file} (이 사용자만 읽기 가능, 600)`, file }; }
+function secureHelper() {
+  const has = (name) => { try { gitRaw([name], { stdio: ['ignore', 'pipe', 'pipe'] }); return true; } catch (e) { return /usage|Usage/.test(`${e.stdout || ''}${e.stderr || ''}`); } };
+  if (process.platform === 'darwin' && has('credential-osxkeychain')) return { helper: 'osxkeychain', label: 'macOS 키체인' };
+  if (process.platform === 'win32') {
+    try { gitRaw(['credential-manager', '--version']); return { helper: 'manager', label: 'Windows 자격 증명 관리자' }; } catch {}
+    return { helper: 'wincred', label: 'Windows 자격 증명 관리자' };
+  }
+  if (has('credential-libsecret')) return { helper: 'libsecret', label: 'libsecret' };
+  return null; // no secure store -> caller asks for consent to use a 600 file
+}
+// read back what the helper stored (compared in memory, never printed)
+function credLookup(helper, url, username) {
+  try {
+    const out = execFileSync('git', ['-c', 'credential.helper=', '-c', `credential.helper=${helper}`, '-c', 'credential.useHttpPath=true', 'credential', 'fill'],
+      { input: credInput(url, username), encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], env: gitEnv(), windowsHide: true, timeout: 30000 });
+    return (out.match(/^password=(.*)$/m) || [])[1] || null;
+  } catch { return null; }
+}
+function credInput(url, username, token) {
+  const u = new URL(url);
+  return `protocol=${u.protocol.replace(':', '')}\nhost=${u.host}\npath=${u.pathname.replace(/^\//, '')}\nusername=${username}\n${token ? `password=${token}\n` : ''}\n`;
+}
+async function setGitToken(msg) {
+  const url = normalizeGitUrl(msg.url || loadConfig().gitRemote);
+  const token = String(msg.token || '').trim();
+  if (!/^https:\/\//i.test(url)) throw new Error('토큰 로그인은 https:// 저장소 주소에서만 됩니다 (SSH 주소는 SSH 키로 로그인).');
+  if (!token || /\s/.test(token)) throw new Error('토큰을 붙여넣으세요.');
+  const username = new URL(url).pathname.split('/')[1] || 'x-access-token';
+  const oneShot = ['-c', 'credential.helper=', '-c', 'credential.helper=!f() { test "$1" = get && printf "username=%s\\npassword=%s\\n" "$ASIDE_GIT_USER" "$ASIDE_GIT_TOKEN"; }; f'];
+  try {
+    execFileSync('git', [...oneShot, 'ls-remote', '--heads', url], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120000, windowsHide: true, env: { ...gitEnv(), ASIDE_GIT_USER: username, ASIDE_GIT_TOKEN: token } });
+  } catch (e) {
+    throw Object.assign(new Error(`이 토큰으로 저장소에 접근하지 못했습니다 (${gitMsg(e)}). 토큰의 Repository access에 이 저장소가 선택됐는지, Contents 권한이 Read and write인지 확인하세요.`), { code: 'GIT_AUTH' });
+  }
+  const store = (sh) => {
+    if (sh.file) { ensureDir(SYNC_HOME); if (!fs.existsSync(sh.file)) fs.writeFileSync(sh.file, '', { mode: 0o600 }); }
+    try {
+      execFileSync('git', ['-c', 'credential.helper=', '-c', `credential.helper=${sh.helper}`, '-c', 'credential.useHttpPath=true', 'credential', 'approve'],
+        { input: credInput(url, username, token), stdio: ['pipe', 'pipe', 'pipe'], env: gitEnv(), windowsHide: true, timeout: 30000 });
+    } catch {}
+    if (sh.file) try { fs.chmodSync(sh.file, 0o600); } catch {}
+    return credLookup(sh.helper, url, username) === token; // helpers report success even when the store failed
+  };
+  let sh = secureHelper();
+  if (!sh || !store(sh)) {
+    if (!msg.allowFile) {
+      throw Object.assign(new Error(`토큰은 맞지만 ${sh ? sh.label : '보안 저장소'}에 저장하지 못했습니다. "파일에 저장"을 허용하면 ~/.aside-sync/git-credentials(이 사용자만 읽기 가능)에 저장합니다.`), { code: 'CRED_STORE' });
+    }
+    sh = fileHelper();
+    if (!store(sh)) throw new Error('토큰을 파일에도 저장하지 못했습니다.');
+  }
+  saveConfig({ gitAuth: { helper: sh.helper, url, username, storedAt: now() } });
+  log(`git token stored in ${sh.label} for ${url}`);
+  return { stored: sh.label, url };
+}
+function clearGitToken() {
+  const cfg = loadConfig(); const a = cfg.gitAuth;
+  if (!a?.helper) return { cleared: false };
+  try {
+    execFileSync('git', ['-c', 'credential.helper=', '-c', `credential.helper=${a.helper}`, '-c', 'credential.useHttpPath=true', 'credential', 'reject'],
+      { input: credInput(a.url, a.username || 'x-access-token'), stdio: ['pipe', 'pipe', 'pipe'], env: gitEnv(), windowsHide: true });
+  } catch {}
+  saveConfig({ gitAuth: null });
+  return { cleared: true };
+}
+
 // One-step setup from the extension: verify repo access, pin the Aside account, register the OS
 // scheduler, then run the first sync. Only the initial native-host install needs a terminal.
 async function connectGit(msg, progress) {
   const url = normalizeGitUrl(msg.url);
   if (!url) throw new Error('저장소 주소를 입력하세요 (예: https://github.com/아이디/aside-sync-data)');
   progress('저장소 접근 확인 중...');
-  checkGitRemote(url);
+  checkGitRemote(url, { interactive: true });
   const cfg0 = loadConfig();
   const accounts = listAccounts(cfg0.asideRoot);
   let accountDir = msg.accountDir || cfg0.accountDir;
@@ -1012,8 +1085,24 @@ const GIT_DIR = path.join(SYNC_HOME, 'repo');
 const GIT_BRANCH = 'main';
 const GIT_TIMEOUT = 15 * 60 * 1000;
 function gitEnv() { return { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', LC_ALL: 'C' }; }
+// Extra "-c" options so git finds a token this tool stored (see setGitToken). Empty when the PC's own
+// git login (keychain / Git Credential Manager / SSH) is used.
+let GIT_AUTH_ARGS = [];
+function useGitAuth(cfg, url = cfg.gitRemote) {
+  const a = cfg.gitAuth;
+  GIT_AUTH_ARGS = a?.helper && a.url === url ? ['-c', 'credential.useHttpPath=true', '-c', `credential.helper=${a.helper}`] : [];
+}
+// Private repos answer "not found" when unauthenticated, so that counts as an auth problem too.
+function isAuthError(t) {
+  return /Authentication failed|could not read Username|could not read Password|terminal prompts disabled|Invalid username or password|Permission denied \(publickey\)|Repository not found|returned error: 40[134]|HTTP Basic: Access denied|access denied|invalid credentials|Write access to repository not granted|denied to /i.test(String(t));
+}
+function authError(prefix, e) {
+  const m = gitMsg(e);
+  if (!isAuthError(m)) return new Error(`${prefix}: ${m}`);
+  return Object.assign(new Error(`GitHub 인증이 필요하거나 만료됐습니다 (${m}). 확장 설정 → GitHub 저장소에서 토큰을 입력하세요.`), { code: 'GIT_AUTH' });
+}
 function gitRaw(args, opts = {}) {
-  return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: gitEnv(), windowsHide: true, maxBuffer: 256 * 1024 * 1024, ...opts });
+  return execFileSync('git', [...GIT_AUTH_ARGS, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: gitEnv(), windowsHide: true, maxBuffer: 256 * 1024 * 1024, ...opts });
 }
 function git(args, opts) { return gitRaw(['-C', GIT_DIR, ...args], opts); }
 function gitMsg(e) {
@@ -1021,10 +1110,13 @@ function gitMsg(e) {
   return t.split('\n').filter(Boolean).slice(-3).join(' / ');
 }
 function gitAvailable() { try { gitRaw(['--version']); return true; } catch { return false; } }
-function checkGitRemote(url) {
+function checkGitRemote(url, { interactive = false } = {}) {
   if (!gitAvailable()) throw new Error('git이 설치되어 있지 않습니다 (macOS: xcode-select --install, Windows: Git for Windows 설치).');
-  try { gitRaw(['ls-remote', '--heads', url], { timeout: 120000 }); }
-  catch (e) { throw new Error(`저장소에 접근할 수 없습니다: ${gitMsg(e)}. 주소와 이 PC의 git 로그인(GitHub 자격 증명)을 확인하세요.`); }
+  useGitAuth(loadConfig(), url);
+  // interactive: user clicked "connect" -> allow Git Credential Manager's own sign-in window (Windows). Never a terminal prompt.
+  const env = interactive ? { ...gitEnv(), GCM_INTERACTIVE: 'auto' } : gitEnv();
+  try { gitRaw(['ls-remote', '--heads', url], { timeout: 300000, env }); }
+  catch (e) { if (isAuthError(gitMsg(e))) throw Object.assign(new Error(`저장소에 접근할 수 없습니다: 이 PC에 GitHub 로그인 정보가 없거나 저장소 주소가 틀렸습니다 (${gitMsg(e)}).`), { code: 'GIT_AUTH' }); throw new Error(`저장소에 접근할 수 없습니다: ${gitMsg(e)}`); }
 }
 function gitHasRef(ref) { try { git(['rev-parse', '--verify', '--quiet', ref]); return true; } catch { return false; } }
 function gitCommitAll(msg) {
@@ -1035,7 +1127,7 @@ function gitCommitAll(msg) {
 }
 function gitPull() {
   try { git(['fetch', '--quiet', 'origin'], { timeout: GIT_TIMEOUT }); }
-  catch (e) { throw new Error(`저장소에서 받지 못했습니다 (네트워크/로그인 확인): ${gitMsg(e)}`); }
+  catch (e) { throw authError('저장소에서 받지 못했습니다 (네트워크 확인)', e); }
   if (!gitHasRef(`origin/${GIT_BRANCH}`)) return; // empty remote: this device publishes first
   if (!gitHasRef('HEAD')) { git(['checkout', '-q', '-B', GIT_BRANCH, `origin/${GIT_BRANCH}`]); return; }
   try {
@@ -1047,6 +1139,7 @@ function gitPull() {
   }
 }
 function gitPrepare(cfg, progress) {
+  useGitAuth(cfg);
   if (!gitAvailable()) throw new Error('git이 설치되어 있지 않습니다 (macOS: xcode-select --install, Windows: Git for Windows 설치).');
   if (fs.existsSync(path.join(GIT_DIR, '.git'))) {
     let cur = ''; try { cur = git(['remote', 'get-url', 'origin']).trim(); } catch {}
@@ -1056,7 +1149,7 @@ function gitPrepare(cfg, progress) {
     if (fs.existsSync(GIT_DIR)) fs.renameSync(GIT_DIR, `${GIT_DIR}-old-${now()}`);
     progress('저장소 받는 중 (처음 한 번)...');
     try { gitRaw(['clone', '--quiet', cfg.gitRemote, GIT_DIR], { timeout: GIT_TIMEOUT }); }
-    catch (e) { throw new Error(`저장소를 받지 못했습니다: ${gitMsg(e)}`); }
+    catch (e) { throw authError('저장소를 받지 못했습니다', e); }
   }
   // repo-local settings: byte-exact files (content hashes!), readable names, a commit identity
   git(['config', 'core.autocrlf', 'false']);
@@ -1080,7 +1173,7 @@ function gitPublish(cfg, res, progress) {
     catch (e) {
       const m = gitMsg(e);
       if (i < 3 && /rejected|non-fast-forward|fetch first/i.test(m)) { gitPull(); continue; } // another PC pushed meanwhile
-      throw new Error(`저장소에 올리지 못했습니다 (다음 동기화 때 다시 시도): ${m}`);
+      throw authError('저장소에 올리지 못했습니다 (다음 동기화 때 다시 시도)', e);
     }
   }
 }
@@ -1185,7 +1278,7 @@ function status() {
   try { scheduler = schedulerStatus(cfg); } catch (e) { scheduler = { error: e.message }; }
   let running = false;
   try { const l = readJson(LOCK_FILE); if (l) { process.kill(l.pid, 0); running = true; } } catch {}
-  return { version: VERSION, node: process.version, config: cfg, accountDir, accountError, lastResult: st.lastResult, devices, syncHome: SYNC_HOME, scheduler, running };
+  return { version: VERSION, node: process.version, config: { ...cfg, gitAuth: cfg.gitAuth ? { helper: cfg.gitAuth.helper, url: cfg.gitAuth.url, storedAt: cfg.gitAuth.storedAt } : null }, accountDir, accountError, lastResult: st.lastResult, devices, syncHome: SYNC_HOME, scheduler, running };
 }
 
 function detect() {
@@ -1211,6 +1304,8 @@ async function handle(msg, send) {
     case 'schedule': return { type: 'scheduler', scheduler: applySchedule() };
     case 'connectGit': return { type: 'connected', ...(await connectGit(msg, (m) => send({ type: 'progress', message: m }))) };
     case 'checkUpdate': return { type: 'update-info', ...(await checkUpdate()) };
+    case 'setGitToken': return { type: 'git-token', ...(await setGitToken(msg)) };
+    case 'clearGitToken': return { type: 'git-token', ...clearGitToken() };
     case 'update': return { type: 'updated', ...(await selfUpdate((m) => send({ type: 'progress', message: m }))) };
     case 'sync': {
       const result = await runSync((m) => send({ type: 'progress', message: m }), 'manual');
@@ -1239,7 +1334,7 @@ function nativeMain() {
       let msg; try { msg = JSON.parse(body); } catch { send({ type: 'error', error: 'invalid json' }); continue; }
       busy = busy.then(async () => {
         try { send({ ...(await handle(msg, send)), requestId: msg.requestId }); }
-        catch (e) { log('ERROR', e?.stack || String(e)); send({ type: 'error', error: e?.message || String(e), requestId: msg.requestId }); }
+        catch (e) { log('ERROR', e?.stack || String(e)); send({ type: 'error', error: e?.message || String(e), code: e?.code, requestId: msg.requestId }); }
       });
     }
   });
@@ -1261,7 +1356,13 @@ async function cliMain(args) {
   else if (cmd === 'connect') {
     const r = await connectGit({ url: args[1], accountDir: args[2] }, (m) => console.log('·', m));
     console.log(JSON.stringify({ gitRemote: r.config.gitRemote, accountDir: r.config.accountDir, autoPicked: r.autoPicked, accounts: r.accounts.map((a) => `u/${a.id} (채팅 ${a.sessionFolders}개)`), scheduler: r.scheduler, result: { ok: r.result.ok, sessions: r.result.sessions, files: r.result.files, errors: r.result.errors } }, null, 2));
-  } else if (cmd === 'update') console.log(JSON.stringify(await selfUpdate((m) => console.log('·', m)), null, 2));
+  } else if (cmd === 'login') {
+    // token via stdin only (never argv/shell history):  printf %s "$TOKEN" | aside-sync-host.mjs login <url>
+    if (process.stdin.isTTY) throw new Error('토큰은 표준입력으로 넘기세요: printf %s "$TOKEN" | aside-sync-host.mjs login <주소>');
+    let tok = ''; for await (const c of process.stdin) tok += c;
+    console.log(JSON.stringify(await setGitToken({ url: args[1], token: tok }), null, 2));
+  } else if (cmd === 'logout') console.log(JSON.stringify(clearGitToken(), null, 2));
+  else if (cmd === 'update') console.log(JSON.stringify(await selfUpdate((m) => console.log('·', m)), null, 2));
   else if (cmd === 'check-update') console.log(JSON.stringify(await checkUpdate(), null, 2));
   else if (cmd === 'schedule') console.log(JSON.stringify(applySchedule(), null, 2));
   else if (cmd === 'unschedule') console.log(JSON.stringify(applySchedule({ ...loadConfig(), autoSyncMinutes: 0 }), null, 2));

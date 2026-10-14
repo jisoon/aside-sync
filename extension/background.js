@@ -17,7 +17,7 @@ function callHost(msg, onProgress) {
       if (m.type === 'progress') { onProgress?.(m.message); return; }
       done = true;
       port.disconnect();
-      if (m.type === 'error') reject(new Error(m.error)); else resolve(m);
+      if (m.type === 'error') reject(Object.assign(new Error(m.error), { code: m.code })); else resolve(m);
     });
     port.onDisconnect.addListener(() => {
       if (done) return;
@@ -129,6 +129,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       }
       default: return null;
     }
-  })().then(sendResponse, (e) => sendResponse({ type: 'error', error: e.message }));
+  })().then(sendResponse, (e) => sendResponse({ type: 'error', error: e.message, code: e.code }));
   return true;
 });

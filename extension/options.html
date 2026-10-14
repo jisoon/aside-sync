@@ -15,6 +15,24 @@
   </div>
   <div class="muted" style="margin-top:4px">주소만 넣고 <b>연결</b>을 누르면 저장소 확인 → Aside 계정 고정 → 자동 동기화 등록 → 첫 동기화까지 한 번에 합니다. 반드시 <b>비공개(Private)</b> 저장소를 쓰세요 (채팅 원문이 올라갑니다). 이 PC에서 git으로 그 저장소에 접근할 수 있어야 합니다.</div>
   <div id="connectMsg" style="margin-top:8px;white-space:pre-wrap"></div>
+  <div class="muted" style="margin-top:4px"><a href="#" id="showAuth">토큰으로 로그인 / 토큰 교체</a> · <a href="#" id="clearAuth">저장된 토큰 삭제</a> <span id="authState"></span></div>
+
+  <div id="authBox" class="card" hidden style="margin-top:8px">
+    <b>GitHub 로그인이 필요합니다</b>
+    <div class="muted" style="margin:4px 0">이 PC의 git에 저장소 접근 권한이 없습니다. <b>이 저장소만</b> 쓸 수 있는 토큰을 만들어 붙여넣으세요.</div>
+    <ol class="muted" style="margin:6px 0 8px 18px;padding:0">
+      <li><a href="#" id="makeToken">토큰 만들기 페이지 열기</a> (이름·기간·Contents 쓰기 권한이 미리 채워집니다)</li>
+      <li><b>Repository access</b> → <b>Only select repositories</b> → <b id="repoName">저장소</b> 선택</li>
+      <li><b>Generate token</b>을 누르고 표시된 토큰(github_pat_...)을 복사</li>
+    </ol>
+    <div class="row" style="gap:8px">
+      <input type="password" id="gitToken" placeholder="github_pat_..." autocomplete="off" style="flex:1">
+      <button class="primary" id="saveToken">저장 후 연결</button>
+    </div>
+    <label class="chk" id="allowFileRow" hidden><input type="checkbox" id="allowFile"> <span>보안 저장소를 쓸 수 없으면 <code>~/.aside-sync/git-credentials</code> 파일에 저장 (이 사용자만 읽기 가능)</span></label>
+    <div class="muted" style="margin-top:4px">토큰은 이 PC의 키체인(Windows: 자격 증명 관리자)에 <b>이 저장소 전용</b>으로 저장되고, 설정 파일·로그·저장소에는 남지 않습니다. 다른 GitHub 로그인에는 영향이 없습니다.</div>
+    <div id="authMsg" style="margin-top:6px;white-space:pre-wrap"></div>
+  </div>
 
   <h2>동기화 폴더 (GitHub 대신 클라우드 폴더를 쓸 때)</h2>
   <input type="text" id="syncDir" placeholder="/Users/me/Library/CloudStorage/GoogleDrive-.../My Drive/AsideSync">
