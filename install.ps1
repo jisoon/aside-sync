@@ -28,23 +28,12 @@ $Node = ((Get-Content $Bat | Select-String '"([^"]+node[^"]*)"').Matches[0].Grou
 $HostJs = Join-Path $env:USERPROFILE ".aside-sync\host\aside-sync-host.mjs"
 
 $status = & $Node --no-warnings $HostJs status | Out-String | ConvertFrom-Json
-if (-not $status.config.syncDir) {
-  $det = & $Node --no-warnings $HostJs detect | Out-String | ConvertFrom-Json
-  $cands = @($det.cloudFolders)
-  if ($cands.Count -gt 0) {
-    Write-Host ""
-    Write-Host "동기화 폴더를 선택하세요 (모든 PC에서 같은 클라우드를 골라야 합니다):"
-    for ($i = 0; $i -lt $cands.Count; $i++) { Write-Host ("  {0}) {1}  -> {2}" -f ($i + 1), $cands[$i].label, $cands[$i].path) }
-    Write-Host "  0) 나중에 확장 옵션에서 직접 지정"
-    $n = Read-Host "번호 [1]"
-    if (-not $n) { $n = "1" }
-    if ($n -ne "0" -and [int]$n -ge 1 -and [int]$n -le $cands.Count) {
-      $chosen = $cands[[int]$n - 1].path
-      & $Node --no-warnings $HostJs config ("syncDir=" + (ConvertTo-Json $chosen)) | Out-Null
-      Write-Host "==> 동기화 폴더: $chosen"
-    }
-  }
-} else { Write-Host "==> 기존 동기화 폴더 유지: $($status.config.syncDir)" }
+if ($status.config.gitRemote) { Write-Host "==> GitHub 저장소 유지: $($status.config.gitRemote)" }
+else {
+  Write-Host "==> GitHub 저장소가 아직 연결되지 않았습니다. 설치 후 아래 중 하나로 연결하세요:"
+  Write-Host "    - 확장 설정 > GitHub 저장소 주소 입력 > 연결"
+  Write-Host "    - & '$Node' '$HostJs' connect https://github.com/<아이디>/aside-sync-data"
+}
 
 Write-Host "==> 자동 동기화 등록 (크롬이 꺼져 있어도 백그라운드에서 실행)"
 $sched = & $Node --no-warnings $HostJs schedule | Out-String | ConvertFrom-Json

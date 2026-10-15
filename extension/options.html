@@ -4,11 +4,11 @@
 <style>body{max-width:640px;margin:0 auto;padding:28px 20px}</style></head>
 <body>
   <h1><img src="icons/48.png" alt="">Aside Sync 설정</h1>
-  <p class="muted">모든 PC에서 <b>같은 GitHub 비공개 저장소</b>(또는 같은 클라우드 폴더)를 지정하면 채팅 기록과 메모리가 서로 동기화됩니다.</p>
+  <p class="muted">모든 PC에서 <b>같은 GitHub 비공개 저장소</b>를 지정하면 채팅 기록과 메모리가 서로 동기화됩니다.</p>
 
   <div id="hostErr" class="card err" hidden></div>
 
-  <h2>GitHub 저장소 (권장)</h2>
+  <h2>GitHub 저장소</h2>
   <div class="row" style="gap:8px">
     <input type="text" id="gitRemote" placeholder="https://github.com/내아이디/aside-sync-data" style="flex:1">
     <button class="primary" id="connect">연결</button>
@@ -33,11 +33,6 @@
     <div class="muted" style="margin-top:4px">토큰은 이 PC의 키체인(Windows: 자격 증명 관리자)에 <b>이 저장소 전용</b>으로 저장되고, 설정 파일·로그·저장소에는 남지 않습니다. 다른 GitHub 로그인에는 영향이 없습니다.</div>
     <div id="authMsg" style="margin-top:6px;white-space:pre-wrap"></div>
   </div>
-
-  <h2>동기화 폴더 (GitHub 대신 클라우드 폴더를 쓸 때)</h2>
-  <input type="text" id="syncDir" placeholder="/Users/me/Library/CloudStorage/GoogleDrive-.../My Drive/AsideSync">
-  <div class="muted" style="margin-top:4px">감지된 클라우드 폴더 (클릭해서 선택):</div>
-  <div class="chips" id="clouds"></div>
 
   <h2>이 PC 이름</h2>
   <input type="text" id="deviceName">

@@ -22,26 +22,14 @@ grep '^등록' /tmp/aside-sync-install.log || true
 NODE="$(grep -o 'exec "[^"]*"' "$HOME/.aside-sync/host/aside-sync-host.sh" | head -1 | cut -d'"' -f2)"
 HOSTJS="$HOME/.aside-sync/host/aside-sync-host.mjs"
 
-# ---- sync folder (skip if already configured)
-CUR="$("$NODE" --no-warnings "$HOSTJS" status 2>/dev/null | "$NODE" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).config.syncDir||"")}catch{console.log("")}})')"
-if [ -z "$CUR" ]; then
-  CANDS=()
-  while IFS= read -r line; do [ -n "$line" ] && CANDS+=("$line"); done < <("$NODE" --no-warnings "$HOSTJS" detect 2>/dev/null | "$NODE" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{for(const c of JSON.parse(s).cloudFolders)console.log(c.label+"\t"+c.path)}catch{}})')
-  CHOSEN=""
-  if [ ${#CANDS[@]} -gt 0 ] && [ -r /dev/tty ]; then
-    echo ""
-    echo "동기화 폴더를 선택하세요 (모든 PC에서 같은 클라우드를 골라야 합니다):"
-    i=1; for c in "${CANDS[@]}"; do echo "  $i) ${c%%$'\t'*}  -> ${c#*$'\t'}"; i=$((i+1)); done
-    echo "  0) 나중에 확장 옵션에서 직접 지정"
-    printf "번호 [1]: "; { read -r n </dev/tty; } 2>/dev/null || n=1; n="${n:-1}"
-    if [ "$n" != "0" ] && [ "$n" -ge 1 ] 2>/dev/null && [ "$n" -le ${#CANDS[@]} ]; then CHOSEN="${CANDS[$((n-1))]#*$'\t'}"; fi
-  fi
-  if [ -n "$CHOSEN" ]; then
-    "$NODE" --no-warnings "$HOSTJS" config syncDir="$("$NODE" -e 'console.log(JSON.stringify(process.argv[1]))' "$CHOSEN")" >/dev/null
-    echo "==> 동기화 폴더: $CHOSEN"
-  fi
+# ---- GitHub connection (Google Drive / iCloud folder sync is not supported)
+GITREMOTE="$("$NODE" --no-warnings "$HOSTJS" status 2>/dev/null | "$NODE" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).config.gitRemote||"")}catch{console.log("")}})')"
+if [ -n "$GITREMOTE" ]; then
+  echo "==> GitHub 저장소 유지: $GITREMOTE"
 else
-  echo "==> 기존 동기화 폴더 유지: $CUR"
+  echo "==> GitHub 저장소가 아직 연결되지 않았습니다. 설치 후 아래 중 하나로 연결하세요:"
+  echo "    - 확장 설정 > GitHub 저장소 주소 입력 > 연결"
+  echo "    - $NODE $HOSTJS connect https://github.com/<아이디>/aside-sync-data"
 fi
 
 echo "==> 자동 동기화 등록 (크롬이 꺼져 있어도 백그라운드에서 실행)"

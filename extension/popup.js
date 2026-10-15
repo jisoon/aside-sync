@@ -21,7 +21,7 @@ function showResult(r) {
   $('last').textContent = `${ago(r.finishedAt)} · ${TRIGGER[r.trigger] || r.trigger || '-'}`;
   const notes = [];
   if (r.sessions.skippedRunning) notes.push(`실행 중인 채팅 ${r.sessions.skippedRunning}개는 다음에 동기화`);
-  if (r.sessions.pending) notes.push(`클라우드 업로드 대기 ${r.sessions.pending}개`);
+  if (r.sessions.pending) notes.push(`업로드 대기 ${r.sessions.pending}개`);
   if (r.sessions.conflicts || r.files.conflicts) notes.push(`충돌 ${r.sessions.conflicts + r.files.conflicts}건 (최신 쪽 유지)`);
   if (r.sessions.downloaded) notes.push('새 채팅이 목록에 안 보이면 Aside를 재시작하세요');
   if (r.files.merged) notes.push(`양쪽에서 고친 파일 ${r.files.merged}개를 줄 단위로 합침`);
@@ -43,9 +43,9 @@ async function refresh() {
   }
   const c = st.config;
   $('device').textContent = c.deviceName;
-  const target = c.gitRemote ? c.gitRemote.replace(/^https?:\/\/(www\.)?/, '').replace(/\.git$/, '') : c.syncDir;
+  const target = c.gitRemote ? c.gitRemote.replace(/^https?:\/\/(www\.)?/, '').replace(/\.git$/, '') : '';
   $('dir').textContent = target || '미설정';
-  $('dir').title = c.gitRemote || c.syncDir;
+  $('dir').title = c.gitRemote || '';
 
   const sc = st.scheduler || {};
   if (!c.autoSyncMinutes) $('sched').textContent = '꺼짐';
@@ -57,14 +57,14 @@ async function refresh() {
 
   const r = st.lastResult;
   if (st.accountError) { setState('bad', '설정 필요'); if (!busy) { $('msg').className = 'err'; $('msg').textContent = st.accountError + '\n→ 설정에서 Aside 계정을 고르세요.'; } $('sync').disabled = true; return; }
-  if (!c.syncDir && !c.gitRemote) setState('bad', '동기화 대상 미설정 (설정에서 GitHub 주소 입력)');
+  if (!c.gitRemote) setState('bad', '동기화 대상 미설정 (설정에서 GitHub 주소 입력)');
   else if (st.running || busy) setState('run', '동기화 중...');
   else if (r && !r.ok) setState('bad', '오류');
   else if (r) setState('ok', '정상');
   else setState('', '아직 동기화 안 함');
   if (r?.errors?.length && !busy) { $('msg').className = 'err'; $('msg').textContent = r.errors.slice(0, 3).join('\n'); }
   showResult(r);
-  $('sync').disabled = !(c.syncDir || c.gitRemote) || busy || st.running;
+  $('sync').disabled = !c.gitRemote || busy || st.running;
   $('sync').textContent = busy || st.running ? '동기화 중...' : '지금 동기화';
 
   $('devices').innerHTML = '';

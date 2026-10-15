@@ -18,7 +18,6 @@ async function load() {
     return;
   }
   const c = st.config;
-  $('syncDir').value = c.syncDir || '';
   $('gitRemote').value = c.gitRemote || '';
   $('authState').textContent = c.gitAuth ? `(토큰 사용 중: ${c.gitAuth.helper.startsWith('store') ? '파일' : c.gitAuth.helper})` : '';
   $('deviceName').value = c.deviceName || '';
@@ -39,22 +38,12 @@ async function load() {
     sel.appendChild(o);
   }
   sel.value = c.accountDir || '';
-  $('clouds').innerHTML = '';
-  for (const cf of det.cloudFolders || []) {
-    const b = document.createElement('button');
-    b.textContent = cf.label;
-    b.title = cf.path;
-    b.onclick = () => { $('syncDir').value = cf.path; };
-    $('clouds').appendChild(b);
-  }
-  if (!det.cloudFolders?.length) $('clouds').innerHTML = '<span class="muted">감지된 폴더 없음. 직접 경로를 입력하세요.</span>';
 }
 
 async function save() {
   const include = {};
   for (const el of document.querySelectorAll('[data-inc]')) include[el.dataset.inc] = el.checked;
   const config = {
-    syncDir: $('syncDir').value.trim(),
     gitRemote: $('gitRemote').value.trim(),
     deviceName: $('deviceName').value.trim() || undefined,
     accountDir: $('accountDir').value || undefined, // keep the pinned account unless one is chosen

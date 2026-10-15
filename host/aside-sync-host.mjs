@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // Aside Sync - native messaging host + CLI
 // Syncs Aside chat history (sessions), projects, memory, user skills, persona and
-// (optionally) settings between PCs through a shared cloud folder
-// (Google Drive / iCloud / Dropbox / OneDrive / NAS ...).
+// (optionally) settings between PCs through a private GitHub repository (git transport).
+// Cloud-folder sync (Google Drive / iCloud / Dropbox / OneDrive ...) is no longer supported.
 //
 // Usage (CLI):
 //   node aside-sync-host.mjs sync            run one sync
 //   node aside-sync-host.mjs status          print config + last result
-//   node aside-sync-host.mjs detect          list Aside accounts + cloud folders
+//   node aside-sync-host.mjs detect          list Aside accounts
 //   node aside-sync-host.mjs config key=value [key=value ...]
 // When Chrome launches it (argv contains chrome-extension://...), it speaks the
 // native messaging protocol on stdin/stdout.
@@ -21,7 +21,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const VERSION = '1.4.0';
+const VERSION = '1.5.0';
 const CODE_REPO = process.env.ASIDE_SYNC_REPO || 'jisoon/aside-sync';
 const CODE_BRANCH = process.env.ASIDE_SYNC_BRANCH || 'main';
 const HOST_FILE = fileURLToPath(import.meta.url);
@@ -49,25 +49,10 @@ const now = () => Date.now();
 
 function ensureDir(d) { fs.mkdirSync(d, { recursive: true }); }
 
-// Cloud provider mount root for paths under ~/Library/CloudStorage/<Provider>/...
-function cloudMountRoot(dir) {
-  const cs = path.join(os.homedir(), 'Library', 'CloudStorage');
-  const rel = path.relative(cs, path.resolve(dir));
-  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null;
-  return path.join(cs, rel.split(path.sep)[0]);
-}
-// The sync folder must already exist (it lives in a cloud drive). Creating it during a sync while the
-// cloud client is signed out / paused produces a plain local folder that is not linked to the cloud;
-// when the client reconnects it is uploaded as a second folder ("AsideSync 2") and the PCs drift apart.
-// So: create only when the user explicitly sets the folder (create=true), never from a sync run.
-function checkSyncDir(dir, { create = false } = {}) {
+// The local store dir (the git clone) must exist; it is never created from a sync run.
+function checkSyncDir(dir) {
   const abs = path.resolve(dir);
-  if (fs.existsSync(abs)) return abs;
-  const mount = cloudMountRoot(abs);
-  if (mount && !fs.existsSync(mount)) throw new Error(`클라우드 드라이브가 연결되어 있지 않습니다 (${path.basename(mount)}). 클라우드 앱 로그인 상태를 확인하세요.`);
-  if (!create) throw new Error(`동기화 폴더를 찾을 수 없습니다: ${abs}. 클라우드 앱(Google Drive 등)이 로그아웃/일시중지됐거나 폴더가 이동·삭제됐을 수 있습니다. 클라우드와 연결 안 된 폴더가 생기는 것을 막기 위해 자동으로 만들지 않습니다. 확장 옵션에서 폴더를 다시 지정하세요.`);
-  if (!fs.existsSync(path.dirname(abs))) throw new Error(`상위 폴더가 없습니다: ${path.dirname(abs)}`);
-  ensureDir(abs);
+  if (!fs.existsSync(abs)) throw new Error(`로컬 저장소 폴더를 찾을 수 없습니다: ${abs}. 확장 옵션에서 GitHub 저장소를 다시 연결하세요.`);
   return abs;
 }
 
@@ -132,8 +117,7 @@ function defaultConfig() {
     deviceName: os.hostname(),
     asideRoot: path.join(os.homedir(), '.aside'),
     accountDir: '', // auto-detect when empty
-    syncDir: '', // cloud folder, e.g. ~/Library/CloudStorage/GoogleDrive-.../My Drive/AsideSync
-    gitRemote: '', // git mode: private repo URL, e.g. https://github.com/me/aside-sync-data.git (takes precedence over syncDir)
+    gitRemote: '', // private GitHub repo URL, e.g. https://github.com/me/aside-sync-data.git
     autoSyncMinutes: 15,
     maxFileMB: 100,
     include: {
@@ -158,7 +142,7 @@ function loadConfig() {
 }
 
 function saveConfig(patch) {
-  if (patch.syncDir) checkSyncDir(patch.syncDir, { create: true });
+  delete patch.syncDir; // cloud-folder mode removed
   if (patch.gitRemote) { patch.gitRemote = normalizeGitUrl(patch.gitRemote); checkGitRemote(patch.gitRemote); }
   const cfg = loadConfig();
   const next = { ...cfg, ...patch, include: { ...cfg.include, ...(patch.include || {}) } };
@@ -215,33 +199,6 @@ function resolveAccountDir(cfg, st = null) {
   throw new Error(`Aside 계정 폴더가 여러 개입니다 (${accs.map((a) => `u/${a.id}: 채팅 ${a.sessionFolders}개`).join(', ')}). 동기화할 계정을 지정하세요: aside-sync-host.mjs config accountDir='"${accs[0].dir}"'`);
 }
 
-function detectCloudFolders() {
-  const home = os.homedir();
-  const cands = [];
-  const add = (p, label) => { try { if (fs.statSync(p).isDirectory()) cands.push({ label, path: path.join(p, 'AsideSync') }); } catch {} };
-  const cs = path.join(home, 'Library', 'CloudStorage');
-  try {
-    for (const d of fs.readdirSync(cs)) {
-      const base = path.join(cs, d);
-      if (d.startsWith('GoogleDrive')) {
-        for (const sub of ['My Drive', '내 드라이브']) add(path.join(base, sub), `Google Drive (${d.replace('GoogleDrive-', '')})`);
-      } else add(base, d);
-    }
-  } catch {}
-  add(path.join(home, 'Library', 'Mobile Documents', 'com~apple~CloudDocs'), 'iCloud Drive');
-  add(path.join(home, 'Dropbox'), 'Dropbox');
-  try { for (const d of fs.readdirSync(home)) if (d.startsWith('OneDrive')) add(path.join(home, d), d); } catch {}
-  add(path.join(home, 'Google Drive', 'My Drive'), 'Google Drive');
-  add(path.join(home, 'iCloudDrive'), 'iCloud Drive');
-  if (process.platform === 'win32') {
-    for (const letter of 'DEFGHIJ') {
-      add(`${letter}:\\My Drive`, `Google Drive (${letter}:)`);
-      add(`${letter}:\\내 드라이브`, `Google Drive (${letter}:)`);
-    }
-  }
-  return cands;
-}
-
 // ---------------------------------------------------------------- path tokenization
 function makePathCodec(localRoot) {
   const rawRoot = localRoot.replace(/[\\/]+$/, '');
@@ -275,9 +232,8 @@ class Store {
     if (m.schema && m.schema > SCHEMA) throw new Error('동기화 폴더가 더 최신 버전의 Aside Sync로 만들어졌습니다. 이 PC의 Aside Sync를 업데이트하세요.');
   }
   p(...parts) { return path.join(this.root, ...parts); }
-  // Cloud drives (esp. Google Drive) allow several folders with the same name. When two PCs
-  // create e.g. "blobs/a6" before seeing each other's, the drive client shows "a6 2", "a6 3"...
-  // Every read therefore treats "<name>" and "<name> N" as one logical folder.
+  // Tolerates duplicate directories named "<name> N" (left over from older cloud-folder stores):
+  // every read treats "<name>" and "<name> N" as one logical folder.
   resolveDirs(...parts) {
     let dirs = [this.root];
     for (const part of parts) {
@@ -376,9 +332,9 @@ class SyncRun {
     };
   }
 
-  // Stall detection without cloud APIs: every device publishes which lastSyncAt of each peer it has seen.
+  // Stall detection: every device publishes which lastSyncAt of each peer it has seen.
   // If an active peer keeps syncing but has not seen our updates for over an hour (while we did publish
-  // newer ones), one side's cloud client is not uploading/downloading -> surface it instead of "ok".
+  // newer ones), one side is not pushing/pulling -> surface it instead of "ok".
   checkPeers(peers) {
     const H = 3600 * 1000;
     const myPrev = this.state.lastPublishedAt || 0;
@@ -386,7 +342,7 @@ class SyncRun {
       const seenMe = p.seen?.[this.cfg.deviceId];
       if (!seenMe || !p.lastSyncAt || now() - p.lastSyncAt > 24 * H) continue;
       if (p.lastSyncAt - seenMe > H && myPrev - seenMe > H) {
-        this.res.errors.push(`'${p.deviceName || p.deviceId}'이(가) 1시간 넘게 이 PC의 변경을 받지 못하고 있습니다. 두 PC의 클라우드 앱(Google Drive 등)이 '최신 상태'인지 확인하고, 아니면 앱을 재시작하거나 계정을 다시 연결하세요.`);
+        this.res.errors.push(`'${p.deviceName || p.deviceId}'이(가) 1시간 넘게 이 PC의 변경을 받지 못하고 있습니다. 두 PC 모두 GitHub 저장소 연결(토큰)과 자동 동기화 등록이 정상인지 확인하세요.`);
       }
     }
   }
@@ -395,10 +351,9 @@ class SyncRun {
   err(where, e) { const m = `${where}: ${e?.message || e}`; log('ERROR', m, e?.stack || ''); this.res.errors.push(m); }
 
   async run() {
-    if (!this.cfg.syncDir) throw new Error('동기화 폴더(syncDir)가 설정되지 않았습니다. 확장 옵션에서 지정하세요.');
     checkSyncDir(this.cfg.syncDir);
     this.store.init();
-    // Guard: if the sync folder/store changed (different path, or cloud replaced/renamed the folder),
+    // Guard: if the sync folder/store changed (different path or re-created store),
     // the saved 3-way base is meaningless. Reset it so nothing is treated as "deleted on the other side".
     const storeMeta = readJson(this.store.p('store.json'), {});
     const storeId = `${path.resolve(this.cfg.syncDir)}|${storeMeta.createdAt || ''}`;
@@ -1040,9 +995,12 @@ async function runSync(onProgress, trigger = 'manual') {
   return withLock(async () => {
     const cfg = loadConfig();
     try {
-      const gitMode = !!cfg.gitRemote;
-      if (gitMode) gitPrepare(cfg, onProgress || (() => {}));
-      const run = new SyncRun(gitMode ? { ...cfg, syncDir: GIT_DIR } : cfg, onProgress);
+      if (!cfg.gitRemote) throw new Error(cfg.syncDir
+        ? '클라우드 폴더(Google Drive/iCloud 등) 동기화는 더 이상 지원하지 않습니다. GitHub 비공개 저장소를 연결하세요: aside-sync-host.mjs connect <github-url>'
+        : 'GitHub 저장소가 설정되지 않았습니다. 확장 옵션에서 저장소 주소를 입력하고 연결하세요.');
+      const gitMode = true;
+      gitPrepare(cfg, onProgress || (() => {}));
+      const run = new SyncRun({ ...cfg, syncDir: GIT_DIR }, onProgress);
       run.res.trigger = trigger;
       const res = await run.run();
       if (gitMode) {
@@ -1269,7 +1227,7 @@ function status() {
   let accountDir = null; let accountError = null;
   try { accountDir = resolveAccountDir(cfg, st); } catch (e) { accountError = e.message; }
   let devices = [];
-  const storeDir = cfg.gitRemote ? GIT_DIR : cfg.syncDir;
+  const storeDir = cfg.gitRemote ? GIT_DIR : null;
   if (storeDir && fs.existsSync(storeDir)) {
     const store = new Store(storeDir);
     devices = store.readDeviceFiles('devices');
@@ -1283,7 +1241,7 @@ function status() {
 
 function detect() {
   const cfg = loadConfig();
-  return { accounts: listAccounts(cfg.asideRoot), cloudFolders: detectCloudFolders(), home: os.homedir(), platform: process.platform };
+  return { accounts: listAccounts(cfg.asideRoot), home: os.homedir(), platform: process.platform };
 }
 
 async function handle(msg, send) {
@@ -1294,7 +1252,6 @@ async function handle(msg, send) {
     case 'setConfig': {
       const patch = { ...(msg.config || {}) };
       delete patch.deviceId;
-      if (patch.syncDir) patch.syncDir = patch.syncDir.replace(/^~(?=$|[\\/])/, os.homedir());
       const before = loadConfig();
       const config = saveConfig(patch);
       let scheduler = null;
@@ -1347,7 +1304,7 @@ async function cliMain(args) {
     const trigger = (args.find((a) => a.startsWith('--trigger=')) || '--trigger=cli').split('=')[1];
     if (args.includes('--allow-mass-delete')) process.env.ASIDE_SYNC_ALLOW_MASS_DELETE = '1';
     if (args.includes('--keep-local')) process.env.ASIDE_SYNC_KEEP_LOCAL = '1';
-    if (trigger === 'scheduler' && !loadConfig().syncDir && !loadConfig().gitRemote) { console.log('syncDir not set, skipping'); process.exit(0); }
+    if (trigger === 'scheduler' && !loadConfig().gitRemote) { console.log('gitRemote not set, skipping'); process.exit(0); }
     const r = await runSync((m) => console.log('·', m), trigger);
     console.log(JSON.stringify(r, null, 2));
     process.exit(r.ok ? 0 : 1);

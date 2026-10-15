@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Aside Sync",
-  "version": "1.4.0",
-  "description": "여러 PC의 Aside 채팅 기록, 메모리, 스킬, 설정을 GitHub 비공개 저장소(또는 클라우드 폴더)로 동기화합니다.",
+  "version": "1.5.0",
+  "description": "여러 PC의 Aside 채팅 기록, 메모리, 스킬, 설정을 GitHub 비공개 저장소로 동기화합니다.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA8O+jYoVfppgTVK427gxKHnwjhDL7Mhwwe+epcSisg85r4xQRA1d9zEFI5zNRHYgizjwPbxa9KPXgXzUQNmtjO+/n6/WFkF4hEmFUR6/xRp2+UOpvbiBU6SxHttYozqiVEeCwrum1lAXvl+lLRf1mYfVL598NWmVAe634F3ZNNoIaNC3qamefwbVP3SjP6v63MN76ZBUTMH/f4OzEEIZkZ7bFF7hcBlTTzOByRPXlpF2ouz6GFpnQwMC1z46z8xilwG3h8/HHzla9ffUl9D0CPb9ANAqUd8aTi3f7TQAd3C9+V4+CV8Z/r5KRZdolWvUExJr9W/9s4x81myWnLbVhwwIDAQAB",
   "permissions": ["nativeMessaging", "alarms", "storage", "notifications"],
   "background": { "service_worker": "background.js" },

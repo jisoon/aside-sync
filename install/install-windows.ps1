@@ -38,4 +38,4 @@ foreach ($k in @("HKCU:\Software\Aside\NativeMessagingHosts", "HKCU:\Software\Go
 Write-Host "완료! node: $Node"
 Write-Host "1) chrome://extensions 에서 '개발자 모드' 켜기"
 Write-Host "2) '압축해제된 확장 프로그램 로드' -> $Src\extension 선택"
-Write-Host "3) 확장 ID가 $ExtId 인지 확인 후, 옵션에서 동기화 폴더 지정"
+Write-Host "3) 확장 ID가 $ExtId 인지 확인 후, 옵션에서 GitHub 저장소 연결"
