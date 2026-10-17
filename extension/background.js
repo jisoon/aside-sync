@@ -65,13 +65,13 @@ async function pollStatus() {
   }
 }
 
-async function runSync() {
+async function runSync(massDelete) {
   if (syncing) return syncing;
   syncing = (async () => {
     setBadge('…', '#6366f1');
     broadcast({ type: 'sync-state', running: true });
     try {
-      const { result } = await callHost({ type: 'sync' }, (message) => broadcast({ type: 'sync-progress', message }));
+      const { result } = await callHost({ type: 'sync', massDelete }, (message) => broadcast({ type: 'sync-progress', message }));
       broadcast({ type: 'sync-done', result });
       return { ok: true, result };
     } catch (e) {
@@ -101,7 +101,7 @@ chrome.runtime.onInstalled.addListener(async (d) => {
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
     switch (msg.type) {
-      case 'sync': return runSync();
+      case 'sync': return runSync(msg.massDelete);
       case 'isSyncing': return { running: !!syncing };
       case 'connectGit': {
         const r = await callHost({ type: 'connectGit', url: msg.url, accountDir: msg.accountDir }, (message) => broadcast({ type: 'connect-progress', message }));

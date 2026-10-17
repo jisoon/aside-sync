@@ -32,6 +32,16 @@
     <div id="notes" class="muted" style="margin-top:6px"></div>
   </div>
 
+  <div id="blocked" class="card" hidden>
+    <div id="blockedText"></div>
+    <details><summary class="muted">목록 보기</summary><div id="blockedList" class="muted" style="max-height:120px;overflow:auto;word-break:break-all"></div></details>
+    <div class="row" style="margin-top:8px;gap:6px">
+      <button id="allowDel" style="flex:1">삭제 받아들이기</button>
+      <button id="keepLocal" style="flex:1">이 PC 파일로 되살리기</button>
+    </div>
+    <div class="muted" style="margin-top:4px">삭제되는 파일은 ~/.aside-sync/conflicts 에 백업됩니다. 되살리면 다른 PC에도 다시 퍼집니다.</div>
+  </div>
+
   <div id="msg" style="margin-top:10px;min-height:18px" class="muted"></div>
   <button id="sync" class="primary" style="width:100%;margin-top:6px">지금 동기화</button>
 

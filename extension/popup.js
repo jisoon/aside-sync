@@ -30,6 +30,15 @@ function showResult(r) {
   $('notes').textContent = notes.join(' · ');
 }
 
+function showBlocked(r) {
+  const files = r?.blockedDeletes || [];
+  $('blocked').hidden = !files.length || busy;
+  if (!files.length) return;
+  $('blockedText').textContent = `다른 PC에서 파일 ${files.length}개가 지워진 것으로 보여 삭제하지 않았습니다. 폴더 이동(정리)일 수도 있으니 목록을 확인하고 선택하세요.`;
+  $('blockedList').textContent = files.join('\n');
+  $('blockedList').style.whiteSpace = 'pre-wrap';
+}
+
 function setState(kind, text) {
   $('dot').className = `dot ${kind}`;
   $('state').textContent = text;
@@ -64,6 +73,7 @@ async function refresh() {
   else setState('', '아직 동기화 안 함');
   if (r?.errors?.length && !busy) { $('msg').className = 'err'; $('msg').textContent = r.errors.slice(0, 3).join('\n'); }
   showResult(r);
+  showBlocked(r);
   $('sync').disabled = !c.gitRemote || busy || st.running;
   $('sync').textContent = busy || st.running ? '동기화 중...' : '지금 동기화';
 
@@ -79,17 +89,21 @@ async function refresh() {
   if (!st.devices?.length) $('devices').textContent = '아직 없음';
 }
 
-$('sync').onclick = async () => {
+async function runSync(massDelete) {
   busy = true;
+  $('blocked').hidden = true;
   $('msg').className = 'muted'; $('msg').textContent = '시작...';
   $('sync').disabled = true; $('sync').textContent = '동기화 중...';
   setState('run', '동기화 중...');
-  const r = await send({ type: 'sync' });
+  const r = await send({ type: 'sync', massDelete });
   busy = false;
   if (r?.ok) { $('msg').className = r.result.ok ? 'ok' : 'err'; $('msg').textContent = r.result.ok ? '동기화 완료' : r.result.errors.join('\n'); }
   else { $('msg').className = 'err'; $('msg').textContent = r?.error || '실패'; }
   refresh();
-};
+}
+$('sync').onclick = () => runSync();
+$('allowDel').onclick = () => runSync('allow');
+$('keepLocal').onclick = () => runSync('keepLocal');
 $('fixSched').onclick = async () => {
   const r = await send({ type: 'host', payload: { type: 'schedule' } });
   $('msg').className = r?.type === 'error' ? 'err' : 'muted';

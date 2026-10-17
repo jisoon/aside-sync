@@ -754,7 +754,8 @@ class SyncRun {
         this.res.notes.push(`다른 PC에서 지운 파일 ${pendingDeletes.length}개를 지우지 않고 다시 올렸습니다 (--keep-local).`);
       } else if (pendingDeletes.length > limit && !allow) {
         this.res.errors.push(`다른 PC에서 파일 ${pendingDeletes.length}개가 지워진 것으로 보이지만 안전을 위해 삭제하지 않았습니다 (한도 ${limit}개). 삭제를 받아들이려면 'sync --allow-mass-delete', 이 PC 파일로 되살리려면 'sync --keep-local'로 실행하세요. 목록: ~/.aside-sync/sync.log`);
-        log('mass delete blocked:', pendingDeletes.map((d) => d.rel).join(', '));
+        this.res.blockedDeletes = pendingDeletes.map((d) => d.rel);
+        log('mass delete blocked:', this.res.blockedDeletes.join(', '));
       } else {
         for (const { abs, rel } of pendingDeletes) {
           try {
@@ -1265,8 +1266,14 @@ async function handle(msg, send) {
     case 'clearGitToken': return { type: 'git-token', ...clearGitToken() };
     case 'update': return { type: 'updated', ...(await selfUpdate((m) => send({ type: 'progress', message: m }))) };
     case 'sync': {
-      const result = await runSync((m) => send({ type: 'progress', message: m }), 'manual');
-      return { type: 'result', result };
+      // one-shot resolution of a blocked mass delete, chosen by the user in the popup
+      const envKey = { allow: 'ASIDE_SYNC_ALLOW_MASS_DELETE', keepLocal: 'ASIDE_SYNC_KEEP_LOCAL' }[msg.massDelete];
+      if (msg.massDelete && !envKey) throw new Error(`unknown massDelete: ${msg.massDelete}`);
+      if (envKey) process.env[envKey] = '1';
+      try {
+        const result = await runSync((m) => send({ type: 'progress', message: m }), 'manual');
+        return { type: 'result', result };
+      } finally { if (envKey) delete process.env[envKey]; }
     }
     default: throw new Error(`unknown message type: ${msg?.type}`);
   }
