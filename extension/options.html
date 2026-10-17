@@ -6,6 +6,10 @@
   <h1><img src="icons/48.png" alt="">Aside Sync 설정</h1>
   <p class="muted">모든 PC에서 <b>같은 GitHub 비공개 저장소</b>를 지정하면 채팅 기록과 메모리가 서로 동기화됩니다.</p>
 
+  <div id="upd" class="card" hidden>
+    <div class="row"><span id="updText"></span><button class="primary" id="updBtn">업데이트</button></div>
+  </div>
+
   <div id="hostErr" class="card err" hidden></div>
 
   <h2>GitHub 저장소</h2>
@@ -70,7 +74,7 @@
 
   <div class="card muted" style="margin-top:22px">
     <div>로그/상태: <code id="home"></code></div>
-    <div>호스트: <span id="ver"></span></div>
+    <div>호스트: <span id="ver"></span> · <a href="#" id="checkUpd">업데이트 확인</a> <span id="updCheckMsg" class="muted"></span></div>
   </div>
   <script src="options.js"></script>
 </body>

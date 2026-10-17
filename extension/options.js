@@ -139,6 +139,28 @@ $('clearAuth').onclick = async (e) => {
   $('connectMsg').className = 'muted'; $('connectMsg').textContent = r?.cleared ? '저장된 토큰을 삭제했습니다.' : '저장된 토큰이 없습니다.';
   load();
 };
+// Same self-update flow as the popup: the host downloads the new version, the extension reloads itself.
+async function checkUpdate(force) {
+  const r = await chrome.runtime.sendMessage({ type: 'checkUpdate', force });
+  if (!r || r.type === 'error') throw new Error(r?.error || '업데이트 확인 실패');
+  $('upd').hidden = !r.newer;
+  if (r.newer) $('updText').textContent = `새 버전 v${r.latest} (현재 v${r.current})`;
+  return r;
+}
+$('checkUpd').onclick = async (e) => {
+  e.preventDefault();
+  const msg = $('updCheckMsg'); msg.className = 'muted'; msg.textContent = '확인 중...';
+  try { const r = await checkUpdate(true); msg.textContent = r.newer ? '' : '최신 버전입니다.'; }
+  catch (err) { msg.className = 'err'; msg.textContent = err.message; }
+};
+$('updBtn').onclick = async () => {
+  $('updBtn').disabled = true; $('updText').className = ''; $('updText').textContent = '업데이트 중...';
+  const r = await chrome.runtime.sendMessage({ type: 'update' });
+  if (!r || r.type === 'error') { $('updText').className = 'err'; $('updText').textContent = r?.error || '업데이트 실패'; $('updBtn').disabled = false; return; }
+  $('updText').className = 'ok'; $('updText').textContent = `v${r.to}로 업데이트했습니다. 확장을 다시 불러옵니다...`;
+};
+chrome.runtime.onMessage.addListener((m) => { if (m.type === 'update-progress') $('updText').textContent = m.message; });
 chrome.runtime.onMessage.addListener((m) => { if (m.type === 'connect-progress' && connecting) $('connectMsg').textContent = m.message; });
 
 load();
+checkUpdate(false).catch(() => {}); // banner only when a newer version exists; failures are silent here (shown on manual check)

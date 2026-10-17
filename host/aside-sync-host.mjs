@@ -21,7 +21,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const VERSION = '1.5.1';
+const VERSION = '1.5.2';
 const CODE_REPO = process.env.ASIDE_SYNC_REPO || 'jisoon/aside-sync';
 const CODE_BRANCH = process.env.ASIDE_SYNC_BRANCH || 'main';
 const HOST_FILE = fileURLToPath(import.meta.url);
