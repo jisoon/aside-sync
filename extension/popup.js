@@ -48,7 +48,9 @@ async function refresh() {
   const st = await send({ type: 'host', payload: { type: 'status' } });
   if (st?.type === 'error') {
     setState('bad', '연결 안 됨');
-    $('msg').className = 'err'; $('msg').textContent = st.error; $('sync').disabled = true; return;
+    $('msg').className = 'err'; $('msg').textContent = st.error; $('sync').disabled = true;
+    if (st.code === 'NO_HOST') { $('msg').textContent += ' (눌러서 설정 열기)'; $('msg').style.cursor = 'pointer'; $('msg').onclick = () => chrome.runtime.openOptionsPage(); }
+    return;
   }
   const c = st.config;
   $('device').textContent = c.deviceName;

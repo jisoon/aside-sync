@@ -10,8 +10,61 @@ function showSched(sc, minutes) {
   else { el.className = 'err'; el.textContent = `자동 동기화가 등록되지 않았습니다${sc.error ? ': ' + sc.error : ''}. 팝업의 '다시 등록' 버튼을 눌러보세요.`; }
 }
 
+// ---- engine (native host) install: the extension can only hand over an installer the user opens once.
+const INSTALL_STEPS = {
+  mac: [
+    '받은 <b>Install-Aside-Sync-mac.zip</b>을 더블클릭해서 압축을 풉니다.',
+    '나온 <b>Install Aside Sync</b> 파일을 <b>우클릭 → 열기</b>로 엽니다. "확인되지 않은 개발자" 경고는 개발자 서명이 없어서 나오는 것입니다.',
+    '그래도 열리지 않으면 <b>시스템 설정 → 개인정보 보호 및 보안</b> 맨 아래의 <b>"그래도 열기"</b>를 누르세요 (macOS 15 이상).',
+    '터미널 창에 "설치가 끝났습니다"가 나오면 끝입니다. 이 화면이 자동으로 바뀝니다.',
+  ],
+  win: [
+    '받은 <b>Install-Aside-Sync.cmd</b>를 엽니다. 크롬이 "위험할 수 있다"고 하면 <b>유지</b>를 누르세요.',
+    '"Windows의 PC 보호" 창이 뜨면 <b>추가 정보 → 실행</b>을 누르세요 (개발자 서명이 없어서 나오는 경고입니다).',
+    '검은 창에 "설치가 끝났습니다"가 나오면 끝입니다. 이 화면이 자동으로 바뀝니다.',
+  ],
+};
+let installPoll = null;
+function showInstall() {
+  $('installCard').hidden = false; $('hostErr').hidden = true;
+  const os = AsideInstaller.detectOs();
+  if (!os) {
+    $('installBtn').disabled = true;
+    $('installMsg').className = 'err'; $('installMsg').textContent = '이 운영체제는 설치 파일 받기를 지원하지 않습니다 (macOS, Windows만). 터미널에서 install.sh를 직접 실행하세요.';
+    return;
+  }
+  if (installPoll) return;
+  // wait for the engine to show up, then switch the page to the normal settings view
+  const started = Date.now();
+  installPoll = setInterval(async () => {
+    if (Date.now() - started > 20 * 60 * 1000) { clearInterval(installPoll); installPoll = null; return; }
+    const st = await host({ type: 'status' });
+    if (st?.type === 'error') return;
+    clearInterval(installPoll); installPoll = null;
+    $('installCard').hidden = true;
+    await load();
+    $('msg').className = 'ok'; $('msg').textContent = '✔ 엔진 설치가 끝났습니다. 아래에서 GitHub 저장소를 연결하세요.';
+  }, 3000);
+}
+$('installBtn').onclick = () => {
+  const out = $('installMsg');
+  try {
+    const os = AsideInstaller.detectOs();
+    const f = AsideInstaller.build(os);
+    const url = URL.createObjectURL(new Blob([f.bytes], { type: f.mime }));
+    const a = document.createElement('a');
+    a.href = url; a.download = f.filename; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    $('installSteps').innerHTML = INSTALL_STEPS[os].map((s) => `<li>${s}</li>`).join('');
+    $('installSteps').hidden = false;
+    out.className = 'muted'; out.textContent = `${f.filename} 을(를) 받았습니다. 아래 순서대로 진행하세요. 설치가 끝나길 기다리는 중...`;
+  } catch (e) { out.className = 'err'; out.textContent = e.message; }
+};
+
 async function load() {
   const st = await host({ type: 'status' });
+  if (st?.type === 'error' && st.code === 'NO_HOST') { showInstall(); return; }
+  $('installCard').hidden = true; $('hostErr').hidden = true;
   if (st?.type === 'error') {
     $('hostErr').hidden = false;
     $('hostErr').textContent = `${st.error}\n\n설치 폴더의 install 스크립트(macOS: install-mac.sh, Windows: install-windows.ps1)를 실행한 뒤 이 페이지를 새로고침하세요.`;

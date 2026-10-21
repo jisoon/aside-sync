@@ -10,6 +10,14 @@
     <div class="row"><span id="updText"></span><button class="primary" id="updBtn">업데이트</button></div>
   </div>
 
+  <div id="installCard" class="card" hidden>
+    <b>먼저 엔진을 설치하세요 (처음 한 번만)</b>
+    <div class="muted" style="margin:4px 0">동기화는 이 PC에서 돌아가는 작은 프로그램(엔진)이 합니다. 크롬 확장만으로는 설치할 수 없어서 설치 파일을 한 번 열어야 합니다. 명령어를 입력할 필요는 없습니다.</div>
+    <button class="primary" id="installBtn">설치 파일 받기</button>
+    <ol id="installSteps" class="muted" style="margin:8px 0 0 18px;padding:0" hidden></ol>
+    <div id="installMsg" style="margin-top:8px;white-space:pre-wrap"></div>
+  </div>
+
   <div id="hostErr" class="card err" hidden></div>
 
   <h2>GitHub 저장소</h2>
@@ -76,6 +84,7 @@
     <div>로그/상태: <code id="home"></code></div>
     <div>호스트: <span id="ver"></span> · <a href="#" id="checkUpd">업데이트 확인</a> <span id="updCheckMsg" class="muted"></span></div>
   </div>
+  <script src="installer.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

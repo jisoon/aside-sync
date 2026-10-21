@@ -39,6 +39,11 @@ if echo "$SCHED" | grep -q '"installed": true'; then echo "    등록 완료"; e
 echo ""
 echo "✔ 설치 완료. 동기화는 이제 자동으로 돌아갑니다."
 echo ""
+# ASIDE_SYNC_HOST_ONLY=1: run from the extension's "install engine" button (extension already installed)
+if [ "${ASIDE_SYNC_HOST_ONLY:-}" = "1" ]; then
+  echo "이 창은 닫고 크롬 확장 설정 화면으로 돌아가세요."
+  exit 0
+fi
 echo "상태 확인용 크롬 확장 (선택, 한 번만):"
 echo "   1) 주소창에 chrome://extensions 입력 → 오른쪽 위 '개발자 모드' 켜기"
 echo "   2) '압축해제된 확장 프로그램 로드' → 아래 폴더 선택"

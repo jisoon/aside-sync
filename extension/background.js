@@ -22,7 +22,8 @@ function callHost(msg, onProgress) {
     port.onDisconnect.addListener(() => {
       if (done) return;
       const err = chrome.runtime.lastError?.message || '네이티브 호스트 연결이 끊겼습니다.';
-      reject(new Error(err.includes('not found') ? '네이티브 호스트가 설치되지 않았습니다. 설치 명령을 먼저 실행하세요.' : err));
+      if (err.includes('not found')) reject(Object.assign(new Error('엔진이 설치되지 않았습니다. 확장 설정 화면에서 "엔진 설치"를 누르세요.'), { code: 'NO_HOST' }));
+      else reject(new Error(err));
     });
     port.postMessage({ ...msg, requestId });
   });
