@@ -24,7 +24,7 @@ const INSTALL_STEPS = {
     '검은 창에 "설치가 끝났습니다"가 나오면 끝입니다. 이 화면이 자동으로 바뀝니다.',
   ],
 };
-let installPoll = null;
+let installPoll = null; let installClickedAt = 0; let installHinted = false;
 function showInstall() {
   $('installCard').hidden = false; $('hostErr').hidden = true;
   const os = AsideInstaller.detectOs();
@@ -39,7 +39,15 @@ function showInstall() {
   installPoll = setInterval(async () => {
     if (Date.now() - started > 20 * 60 * 1000) { clearInterval(installPoll); installPoll = null; return; }
     const st = await host({ type: 'status' });
-    if (st?.type === 'error') return;
+    if (st?.type === 'error') {
+      // the extension cannot read the installer's own error text, so point at it after a while
+      if (installClickedAt && !installHinted && Date.now() - installClickedAt > 3 * 60 * 1000) {
+        installHinted = true;
+        $('installMsg').className = 'err';
+        $('installMsg').textContent = '설치가 오래 걸리고 있습니다. 설치 창(터미널/검은 창)의 메시지를 확인하세요. 실패했다면 원인이 한국어로 적혀 있습니다. 흔한 원인: 인터넷 연결 끊김, 디스크 여유 공간 부족, 보안 프로그램의 다운로드 차단. 해결 후 받은 설치 파일을 다시 열면 이어서 설치합니다.';
+      }
+      return;
+    }
     clearInterval(installPoll); installPoll = null;
     $('installCard').hidden = true;
     await load();
@@ -57,6 +65,7 @@ $('installBtn').onclick = () => {
     setTimeout(() => URL.revokeObjectURL(url), 60000);
     $('installSteps').innerHTML = INSTALL_STEPS[os].map((s) => `<li>${s}</li>`).join('');
     $('installSteps').hidden = false;
+    installClickedAt = Date.now(); installHinted = false;
     out.className = 'muted'; out.textContent = `${f.filename} 을(를) 받았습니다. 아래 순서대로 진행하세요. 설치가 끝나길 기다리는 중...`;
   } catch (e) { out.className = 'err'; out.textContent = e.message; }
 };

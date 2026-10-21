@@ -92,7 +92,7 @@ irm https://raw.githubusercontent.com/jisoon/aside-sync/main/install.ps1 | iex
 2. 네이티브 호스트 등록
    - macOS: `bash install/install-mac.sh`
    - Windows: PowerShell에서 `powershell -ExecutionPolicy Bypass -File .\install\install-windows.ps1`
-   - Node 22.5 이상이 필요하며, Aside에 내장된 Node(`~/.aside/runtime/bin/node`)를 우선 사용합니다.
+   - Node 22.5 이상이 필요합니다. Aside에 내장된 Node(`~/.aside/runtime/bin/node` 또는 `~/.aside/runtime/node/bin/node`), 그다음 PC에 설치된 Node를 쓰고, 둘 다 없으면 nodejs.org 공식 배포본을 받아 `~/.aside-sync/runtime`에 둡니다 (공식 체크섬 검증, 시스템 Node·PATH는 건드리지 않음, 관리자 권한 불필요).
 3. 크롬 `chrome://extensions` → 개발자 모드 ON → **압축해제된 확장 프로그램 로드** → `extension` 폴더 선택
    - 확장 ID: `dmncckmmjbfdafmjnleocmfogddimkah` (manifest의 key로 고정되어 모든 PC에서 같음)
 4. 확장 옵션 페이지에서 **모든 PC에 같은 GitHub 비공개 저장소**를 입력하고 **연결**. 연결하면 자동 동기화(OS 예약 작업)도 함께 등록됩니다.
@@ -150,7 +150,7 @@ $NODE ~/.aside-sync/host/aside-sync-host.mjs unschedule    # 자동 동기화 �
 
 ## 변경 이력
 
-- **1.6.0**: 확장 설정 화면에서 **엔진 설치** (터미널 명령 없이 설치 파일을 받아 한 번 열기). 메모리 감사 로그 `memory/.history.jsonl`은 PC별 파일이라 동기화에서 제외하고, `maxFileMB`를 일반 파일(메모리·스킬)에도 적용 (push가 HTTP 408로 실패하던 원인)
+- **1.6.0**: 확장 설정 화면에서 **엔진 설치** (터미널 명령 없이 설치 파일을 받아 한 번 열기). Node.js가 없는 PC도 설치기가 Node를 스스로 준비합니다. 메모리 감사 로그 `memory/.history.jsonl`은 PC별 파일이라 동기화에서 제외하고, `maxFileMB`를 일반 파일(메모리·스킬)에도 적용 (push가 HTTP 408로 실패하던 원인)
 - **1.5.2**: 설정 페이지에 새 버전 알림 배너와 업데이트 버튼, '업데이트 확인' 링크 추가 (팝업과 같은 자체 업데이트)
 - **1.5.1**: 대량 삭제가 차단되면 팝업에 파일 목록과 선택 버튼(삭제 받아들이기 / 이 PC 파일로 되살리기)을 표시. 폴더 이동(정리)이 삭제로 보이는 경우를 터미널 없이 처리
 - **1.5.0**: Google Drive / iCloud 등 클라우드 폴더 동기화 제거 (GitHub 전용). 폴더 자동 감지, 폴더 선택 UI, 설치 스크립트의 폴더 선택 단계, `config syncDir` 삭제. 기존 폴더 방식 PC는 오류 안내 후 중단(파일 삭제 없음)

@@ -3,6 +3,7 @@
 //  - macOS:   zip holding an executable .command (a bare download would lose the +x bit and not run)
 //  - Windows: .cmd
 // Both just run the repo's own installer with ASIDE_SYNC_HOST_ONLY=1 (host only; the extension is already installed).
+// That installer fetches its own Node.js runtime when the PC has none, so nothing else has to be installed first.
 (function (root) {
   const REPO = 'jisoon/aside-sync';
   const RAW = `https://raw.githubusercontent.com/${REPO}/main`;
@@ -18,8 +19,8 @@ if curl -fsSL ${RAW}/install.sh | bash; then
   echo "✔ 설치가 끝났습니다. 이 창은 닫고 크롬 확장 설정 화면으로 돌아가세요."
 else
   echo ""
-  echo "✘ 설치에 실패했습니다. 위의 메시지를 확인하세요."
-  echo "  (Node.js 22.5 이상이 필요합니다. Aside를 설치했거나 https://nodejs.org 에서 설치한 뒤 다시 실행하세요.)"
+  echo "✘ 설치에 실패했습니다. 위의 메시지에 원인이 적혀 있습니다."
+  echo "  (인터넷 연결과 디스크 여유 공간을 확인한 뒤 이 파일을 다시 열면 이어서 설치합니다.)"
 fi
 echo ""
 read -n 1 -s -r -p "아무 키나 누르면 이 창이 닫힙니다."
@@ -34,7 +35,7 @@ read -n 1 -s -r -p "아무 키나 누르면 이 창이 닫힙니다."
     `powershell -NoProfile -ExecutionPolicy Bypass -Command "irm ${RAW}/install.ps1 | iex"`,
     'if errorlevel 1 (',
     '  echo.',
-    '  echo 설치에 실패했습니다. 위의 메시지를 확인하세요. Node.js 22.5 이상이 필요합니다: https://nodejs.org',
+    '  echo 설치에 실패했습니다. 위의 메시지에 원인이 적혀 있습니다. 인터넷 연결과 디스크 여유 공간을 확인한 뒤 이 파일을 다시 실행하세요.',
     ') else (',
     '  echo.',
     '  echo 설치가 끝났습니다. 이 창은 닫고 크롬 확장 설정 화면으로 돌아가세요.',
