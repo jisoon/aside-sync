@@ -38,7 +38,8 @@ const SCHEMA = 1;
 
 // settings.json keys that are device specific or contain secrets -> never synced
 const SETTINGS_EXCLUDE = ['routineDeviceId', 'externalPasswordManagers', 'cli', 'mcp', 'customModels', 'analytics'];
-const FILE_EXCLUDE = [/^memory\/memory-index-local\.json$/, /^memory\/\.dream-state\.json$/, /^memory\/\.local-memory\//, /(^|\/)\.DS_Store$/, /(^|\/)Thumbs\.db$/, /\.aside-sync-tmp$/];
+// memory/.history.jsonl = per-PC audit log (full before/after file contents + LLM prompts per run); grows to 100+ MB
+const FILE_EXCLUDE = [/^memory\/memory-index-local\.json$/, /^memory\/\.dream-state\.json$/, /^memory\/\.history\.jsonl$/, /^memory\/\.local-memory\//, /(^|\/)\.DS_Store$/, /(^|\/)Thumbs\.db$/, /\.aside-sync-tmp$/];
 // columns that only make sense on the machine that owns the browser
 const ROW_FP_IGNORE = ['active_tab_target_id', 'browser_binding'];
 
@@ -697,6 +698,8 @@ class SyncRun {
       if (!this.inScope(rel)) continue;
       try {
         const abs = path.join(this.accountDir, ...rel.split('/'));
+        // too big for the repo (GitHub rejects >100 MB): leave it alone, neither upload nor treat as deleted
+        if (local.has(rel) && fs.statSync(abs).size > this.cfg.maxFileMB * 1024 * 1024) { log(`file ${rel}: larger than ${this.cfg.maxFileMB} MB, skipped`); continue; }
         let L = null; let lInfo = null;
         if (local.has(rel)) { lInfo = cachedHash(this.state, abs); L = lInfo.hash; }
         const R = remote.get(rel);
