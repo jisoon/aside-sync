@@ -26,9 +26,8 @@ Aside Sync는 여러 PC에서 쓰는 Aside의 채팅 기록, 프로젝트, 메�
 • 대량 삭제 차단과 삭제 전 백업 등 안전장치
 
 ⚠ 설치 전 꼭 읽어주세요
-이 확장은 PC에 설치하는 로컬 동기화 엔진과 함께 동작합니다. 스토어에서 확장을 설치한 뒤, 각 PC에서 터미널 명령 한 줄로 엔진을 설치해야 합니다.
-macOS: curl -fsSL https://raw.githubusercontent.com/jisoon/aside-sync/main/install.sh | bash
-Windows(PowerShell): irm https://raw.githubusercontent.com/jisoon/aside-sync/main/install.ps1 | iex
+이 확장은 PC에 설치하는 로컬 동기화 엔진과 함께 동작합니다. 스토어에서 확장을 설치한 뒤, 확장 설정 화면의 '설치 파일 받기'를 누르고 받은 파일을 각 PC에서 한 번 열면 엔진이 설치됩니다(터미널 불필요, macOS는 우클릭 → 열기).
+터미널을 선호하면 macOS: curl -fsSL https://raw.githubusercontent.com/jisoon/aside-sync/main/install.sh | bash / Windows(PowerShell): irm https://raw.githubusercontent.com/jisoon/aside-sync/main/install.ps1 | iex
 필요: Git, GitHub 비공개 저장소.
 채팅 원문이 저장소에 올라가므로 반드시 비공개 저장소를 사용하세요.
 안내: https://github.com/jisoon/aside-sync
@@ -38,7 +37,7 @@ Aside Sync syncs Aside chat history, projects, memory, skills and AGENTS.md/SOUL
 
 Features: status popup with "Sync now"; automatic sync every 15 minutes via the OS scheduler (works even when Chrome is closed); commit-based uploads with full history; mass-delete protection with backups.
 
-IMPORTANT: this extension works together with a local sync engine. After installing from the store, run the one-line installer on each PC (see https://github.com/jisoon/aside-sync). Requires Git and a private GitHub repository. Chat content is uploaded as-is, so use a private repository.
+IMPORTANT: this extension works together with a local sync engine. After installing from the store, open the extension's settings page, click the installer download button and open the downloaded file once on each PC (no terminal needed; a one-line terminal installer is also available, see https://github.com/jisoon/aside-sync). Requires Git and a private GitHub repository. Chat content is uploaded as-is, so use a private repository.
 
 ## 단일 목적(Single purpose)
 Aside 데이터를 사용자의 GitHub 비공개 저장소로 동기화하고 그 상태를 보여준다. / Sync Aside data to the user's private GitHub repository and show its status.
@@ -58,5 +57,6 @@ Aside 데이터를 사용자의 GitHub 비공개 저장소로 동기화하고 �
 팝업(정상 상태), 옵션 > GitHub 저장소 연결, 대량 삭제 해결 화면 — 직접 캡처 필요.
 
 ## 심사 전 확인할 위험
+- 1.6.0부터 확장 설정 화면이 설치 파일(macOS .command zip / Windows .cmd)을 브라우저에서 만들어 내려받게 합니다. 심사에서 "실행 파일 배포"로 보일 수 있으니 상세 설명에 이 동작과 설치 파일이 저장소의 install 스크립트를 실행한다는 점을 밝혀 두세요.
 - 팝업/옵션의 "업데이트" 버튼은 확장 파일을 직접 갈아끼우는 자체 업데이트입니다. 스토어 설치본은 스토어가 업데이트하므로 이 버튼은 스토어 버전에서 숨기거나 엔진(host) 업데이트 전용으로 바꾸는 편이 안전합니다(심사에서 원격 코드로 오해 소지).
 - Aside 브라우저가 Chrome 웹 스토어 설치를 지원하는지 확인 필요(Chrome에서는 문제 없음).
